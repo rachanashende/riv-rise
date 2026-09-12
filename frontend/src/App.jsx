@@ -935,8 +935,10 @@ export default function RiseGtmApp() {
 function GlobalStyle() {
   return (
     <style>{`
-      * { box-sizing: border-box; }
       @import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+      * { box-sizing: border-box; }
+      button:focus-visible { outline: 2px solid ${BRAND.coral}; outline-offset: 2px; }
+      input:focus, select:focus, textarea:focus { outline: 2px solid ${BRAND.coral}; outline-offset: 0; }
       .gtm-portal-spin { animation: gtm-portal-spin 0.9s linear infinite; }
       @keyframes gtm-portal-spin { to { transform: rotate(360deg); } }
     `}</style>
