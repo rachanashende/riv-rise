@@ -1,5 +1,5 @@
-import "dotenv/config";
-import { app, ensureSchema } from "./app.js";
+require("dotenv/config");
+const { app, ensureSchema } = require("./app.js");
 
 const PORT = process.env.PORT || 4100;
 

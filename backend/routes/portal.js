@@ -1,8 +1,8 @@
 // RISE Portal — GTM Partner + Startup facing endpoints (PRD §6.3, §6.4,
 // §6.5, §9 access rules). Admin-only management lives in admin.js.
-import { Router } from "express";
-import pool from "../db.js";
-import { requireAuth, requireRole } from "../middleware/auth.js";
+const { Router } = require("express");
+const { pool } = require("../db.js");
+const { requireAuth, requireRole } = require("../middleware/auth.js");
 
 const router = Router();
 router.use(requireAuth);
@@ -385,4 +385,4 @@ async function notifyOtherParty(req, intro, type) {
   }
 }
 
-export default router;
+module.exports = router;

@@ -1,7 +1,7 @@
-import { Router } from "express";
-import bcrypt from "bcryptjs";
-import pool from "../db.js";
-import { requireAuth, signToken } from "../middleware/auth.js";
+const { Router } = require("express");
+const bcrypt = require("bcryptjs");
+const { pool } = require("../db.js");
+const { requireAuth, signToken } = require("../middleware/auth.js");
 
 const router = Router();
 
@@ -30,4 +30,4 @@ router.get("/me", requireAuth, (req, res) => {
   res.json({ user: req.user });
 });
 
-export default router;
+module.exports = router;

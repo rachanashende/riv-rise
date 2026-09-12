@@ -11,7 +11,7 @@
 // and role names here are plain: partners, startups, retailers,
 // introductions, invoices, payouts, notifications; roles 'admin' /
 // 'partner' / 'startup'.
-import pg from "pg";
+const pg = require("pg");
 
 const { Pool } = pg;
 
@@ -25,7 +25,7 @@ function wantsSsl() {
   return url.includes("supabase.co") || url.includes("supabase.com");
 }
 
-export const pool = new Pool({
+const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: wantsSsl() ? { rejectUnauthorized: false } : false,
 });
@@ -36,7 +36,7 @@ export const pool = new Pool({
 // "Closed – Won" / "Closed – Lost"; a plain hyphen is used here instead so
 // the value round-trips safely through JSON/SQL/URLs without encoding
 // surprises — cosmetic only, same meaning.)
-export const INTRODUCTION_STATUSES = [
+const INTRODUCTION_STATUSES = [
   "Requested",
   "Pending Startup Agreement",
   "Approved",
@@ -50,7 +50,7 @@ export const INTRODUCTION_STATUSES = [
   "Payout Complete",
 ];
 
-export async function initSchema() {
+async function initSchema() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
       id SERIAL PRIMARY KEY,
@@ -236,4 +236,4 @@ export async function initSchema() {
   await pool.query(`ALTER TABLE introductions ADD COLUMN IF NOT EXISTS updated_by TEXT;`);
 }
 
-export default pool;
+module.exports = { pool, INTRODUCTION_STATUSES, initSchema };

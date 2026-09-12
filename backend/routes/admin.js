@@ -1,10 +1,10 @@
 // RISE Portal — RIV Admin/Ops endpoints (PRD §6.1/§6.2 onboarding fields,
 // §7 rate overrides, §8.5–§8.7 agreements/invoices/payouts, §9 full
 // visibility). Mounted at /api/admin, requireAdmin throughout.
-import { Router } from "express";
-import bcrypt from "bcryptjs";
-import pool, { INTRODUCTION_STATUSES } from "../db.js";
-import { requireAuth, requireAdmin } from "../middleware/auth.js";
+const { Router } = require("express");
+const bcrypt = require("bcryptjs");
+const { pool, INTRODUCTION_STATUSES } = require("../db.js");
+const { requireAuth, requireAdmin } = require("../middleware/auth.js");
 
 const router = Router();
 router.use(requireAuth, requireAdmin);
@@ -465,4 +465,4 @@ async function notifyUserId(userId, type, introId) {
   );
 }
 
-export default router;
+module.exports = router;

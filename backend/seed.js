@@ -1,6 +1,6 @@
-import "dotenv/config";
-import bcrypt from "bcryptjs";
-import { pool, initSchema } from "./db.js";
+require("dotenv/config");
+const bcrypt = require("bcryptjs");
+const { pool, initSchema } = require("./db.js");
 
 // Demo data — one admin, one GTM partner, one RISE startup, three retailers
 // (two in the partner's network, one RIV-direct), and two introductions at

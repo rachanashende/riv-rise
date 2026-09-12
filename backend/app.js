@@ -1,12 +1,12 @@
-import express from "express";
-import cors from "cors";
+const express = require("express");
+const cors = require("cors");
 
-import { initSchema } from "./db.js";
-import authRoutes from "./routes/auth.js";
-import portalRoutes from "./routes/portal.js";
-import adminRoutes from "./routes/admin.js";
+const { initSchema } = require("./db.js");
+const authRoutes = require("./routes/auth.js");
+const portalRoutes = require("./routes/portal.js");
+const adminRoutes = require("./routes/admin.js");
 
-export const app = express();
+const app = express();
 app.use(cors());
 app.use(express.json({ limit: "2mb" }));
 
@@ -21,7 +21,7 @@ app.use((err, req, res, next) => {
 });
 
 let schemaReady;
-export function ensureSchema() {
+function ensureSchema() {
   if (!schemaReady) schemaReady = initSchema();
   return schemaReady;
-}
+}module.exports = { app, ensureSchema };
