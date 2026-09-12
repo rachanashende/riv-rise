@@ -51,8 +51,8 @@ Demo logins after seeding:
 
 ## Deployment
 
-Two independent Render services, pointed at a dedicated Supabase Postgres
-project (not the RIOS one):
+Two independent Netlify services, pointed at a dedicated Supabase Postgres
+project:
 
 - **Backend** — Web Service, root directory `backend`, build `npm install`,
   start `npm start`. Env vars: `DATABASE_URL` (Supabase connection string),
