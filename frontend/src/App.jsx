@@ -33,6 +33,20 @@ const STATUS_COLORS = {
   "Payout Complete": { bg: "#E6F4EA", fg: "#1E7A34" },
 };
 
+// Introduction Request Status (approval_status) — the new RIV approval
+// chain, kept separate from STATUS_COLORS/legacy `status` above (see
+// db.js's APPROVAL_STATUSES comment for why the two are different fields).
+const APPROVAL_COLORS = {
+  "Pending RIV Approval": { bg: "#FFF4E0", fg: "#B8790A" },
+  "RIV Approved": { bg: "#E8F0FE", fg: BRAND.blue },
+  "Rejected": { bg: "#FBEAEA", fg: BRAND.coralDark },
+  "GTM Notified": { bg: "#E8F0FE", fg: BRAND.blue },
+  "Startup Confirmed": { bg: "#EFE9FB", fg: "#6B3FBF" },
+  "Introduced": { bg: "#E8F0FE", fg: BRAND.blue },
+  "Proof Recorded": { bg: "#E6F4EA", fg: "#1E7A34" },
+};
+const DEAL_STATUS_OPTIONS = ["Demo", "Pilot", "Proposal", "Negotiation", "Follow-up", "Closed Won", "Closed Lost"];
+
 /* =========================================================================
    UI PRIMITIVES
    ========================================================================= */
@@ -105,8 +119,8 @@ function EmptyState({ icon: Icon, title, text }) {
     </div>
   );
 }
-function StatusBadge({ status }) {
-  const c = STATUS_COLORS[status] || { bg: "#F3F1EE", fg: "#8A857F" };
+function StatusBadge({ status, colors = STATUS_COLORS }) {
+  const c = colors[status] || { bg: "#F3F1EE", fg: "#8A857F" };
   return (
     <span style={{ fontFamily: FONT, fontWeight: 600, fontSize: 11, padding: "4px 10px", borderRadius: 999, background: c.bg, color: c.fg, whiteSpace: "nowrap" }}>
       {status}
@@ -193,12 +207,13 @@ function LoginView({ onAuthed }) {
 /* =========================================================================
    NAV
    ========================================================================= */
-function NavBar({ view, setView, user, onLogout }) {
+function NavBar({ view, setView, user, onLogout, onAddRetailer }) {
   const items =
     user.role === "partner" ? [
-      { id: "startups", label: "Startups" }, { id: "retailers", label: "Retailers" }, { id: "introductions", label: "My Introductions" },
+      { id: "startups", label: "Startups" }, { id: "retailers", label: "My Retailers" },
+      { id: "requests", label: "Introduction Requests" },
     ] : user.role === "startup" ? [
-      { id: "retailers", label: "Retailer Directory" }, { id: "introductions", label: "My Introductions" },
+      { id: "retailers", label: "Retailer Directory" }, { id: "introductions", label: "Startup Retailer Introductions" },
     ] : [
       { id: "overview", label: "Overview" }, { id: "partners", label: "Partners" }, { id: "startups", label: "Startups" },
       { id: "retailers", label: "Retailers" }, { id: "introductions", label: "Introductions" },
@@ -223,6 +238,9 @@ function NavBar({ view, setView, user, onLogout }) {
           </div>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          {user.role === "partner" && view === "retailers" && (
+            <PrimaryButton icon={Plus} onClick={onAddRetailer} style={{ padding: "8px 14px" }}>Add Retailer</PrimaryButton>
+          )}
           <div style={{ fontFamily: FONT, fontSize: 12.5, color: "#7A756F" }}>{user.name}</div>
           <GhostButton onClick={onLogout} icon={LogOut} style={{ padding: "8px 12px" }}>Log out</GhostButton>
         </div>
@@ -277,8 +295,9 @@ function IntroDetailModal({ intro, user, onClose, onRefresh }) {
   return (
     <Modal title={`${intro.startup_name} → ${intro.retailer_name}`} onClose={onClose} width={560}>
       <ErrorBanner text={error} />
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-        <StatusBadge status={intro.status} />
+      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+        <StatusBadge status={intro.approval_status} colors={APPROVAL_COLORS} />
+        {intro.engagement_stage && <StatusBadge status={intro.engagement_stage} />}
         <span style={{ fontFamily: FONT, fontSize: 12, color: "#9B958F" }}>
           {intro.partner_name ? `Partner: ${intro.partner_name}` : "RIV direct"} · Intro rate {intro.intro_rate}% / Closure rate {intro.closure_rate}%
         </span>
@@ -308,18 +327,29 @@ function IntroDetailModal({ intro, user, onClose, onRefresh }) {
         </div>
       )}
 
-      {/* Startup agrees to a partner-proposed introduction */}
-      {isStartup && intro.status === "Pending Startup Agreement" && (
+      {/* Startup confirms after RIV has approved and the GTM partner has
+          been notified (addendum §3's approval chain). */}
+      {isStartup && intro.approval_status === "GTM Notified" && (
         <Card style={{ padding: 14, marginBottom: 14, background: "#FFF9F0" }}>
           <div style={{ fontFamily: FONT, fontSize: 12.5, color: BRAND.ink, marginBottom: 10, lineHeight: 1.6 }}>
-            {intro.partner_name} wants to introduce you to <strong>{intro.retailer_name}</strong>. Agreeing confirms you accept RIV's charge — {intro.intro_rate}% on introduction, {intro.closure_rate}% on closure.
+            RIV has approved this request and notified {intro.partner_name || "RIV Ops"}. Confirm to let them make the introduction.
           </div>
-          <PrimaryButton disabled={busy} onClick={() => run(() => api.agreeIntroduction(intro.id))}>I agree to the charge</PrimaryButton>
+          <PrimaryButton disabled={busy} onClick={() => run(() => api.confirmRequest(intro.id))}>Confirm introduction</PrimaryButton>
         </Card>
       )}
+      {intro.approval_status === "Pending RIV Approval" && (
+        <div style={{ fontFamily: FONT, fontSize: 12.5, color: "#B8790A", padding: "10px 14px", background: "#FFF4E0", borderRadius: 10, marginBottom: 14 }}>
+          Waiting on RIV's review before this moves forward.
+        </div>
+      )}
+      {intro.approval_status === "Rejected" && (
+        <div style={{ fontFamily: FONT, fontSize: 12.5, color: BRAND.coralDark, padding: "10px 14px", background: "#FBEAEA", borderRadius: 10, marginBottom: 14 }}>
+          RIV declined this request.
+        </div>
+      )}
 
-      {/* Partner logs proof once approved */}
-      {isPartner && intro.status === "Approved" && (
+      {/* Partner logs proof once the startup has confirmed */}
+      {isPartner && intro.approval_status === "Startup Confirmed" && (
         <Card style={{ padding: 14, marginBottom: 14 }}>
           <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12.5, marginBottom: 10 }}>Log the introduction</div>
           <Field label="Channel">
@@ -384,7 +414,7 @@ function IntroDetailModal({ intro, user, onClose, onRefresh }) {
 /* =========================================================================
    PARTNER VIEWS
    ========================================================================= */
-function PartnerStartupsView({ onIntroduce }) {
+function PartnerStartupsView({ onViewDetails }) {
   const [startups, setStartups] = useState(null);
   const [error, setError] = useState("");
   useEffect(() => { api.getStartups().then((r) => setStartups(r.startups)).catch((e) => setError(e.message)); }, []);
@@ -400,45 +430,54 @@ function PartnerStartupsView({ onIntroduce }) {
             <div style={{ fontFamily: FONT, fontSize: 12, color: "#9B958F", marginTop: 3 }}>{s.sector}</div>
             <div style={{ fontFamily: FONT, fontSize: 12.5, color: "#7A756F", marginTop: 6, maxWidth: 480 }}>{s.solution_summary}</div>
           </div>
-          <PrimaryButton icon={Handshake} onClick={() => onIntroduce(s)} style={{ flexShrink: 0 }}>Introduce</PrimaryButton>
+          <GhostButton onClick={() => onViewDetails(s.id)} style={{ flexShrink: 0 }}>View Details</GhostButton>
         </Card>
       ))}
     </div>
   );
 }
 
-function NewIntroductionModal({ startup, onClose, onCreated }) {
-  const [retailers, setRetailers] = useState(null);
-  const [retailerId, setRetailerId] = useState("");
+// Startup Detail View (addendum §4) — the profile a GTM partner reviews
+// before deciding whether to back an introduction. Same modal serves
+// admin's own read of a startup's profile.
+function StartupDetailModal({ startupId, onClose }) {
+  const [startup, setStartup] = useState(null);
   const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
-  useEffect(() => { api.getRetailers().then((r) => setRetailers(r.retailers)).catch((e) => setError(e.message)); }, []);
+  useEffect(() => { api.getStartup(startupId).then((r) => setStartup(r.startup)).catch((e) => setError(e.message)); }, [startupId]);
 
-  async function submit() {
-    setError(""); setBusy(true);
-    try {
-      await api.createIntroduction({ startupId: startup.id, retailerId: Number(retailerId) });
-      await onCreated();
-      onClose();
-    } catch (err) { setError(err.message); }
-    finally { setBusy(false); }
-  }
+  const rows = startup ? [
+    ["Sector", startup.sector],
+    ["Problem", startup.problem_description],
+    ["Solution", startup.solution_description],
+    ["Top 3 benefits", startup.top_benefits],
+    ["Tech stack", startup.tech_stack],
+    ["Sub-vertical", startup.sub_vertical],
+    ["Competition", startup.competition],
+    ["Competitive advantage", startup.competitive_advantage],
+    ["Paying customers", startup.paying_customer_count],
+    ["Notable customers", startup.notable_customers],
+    ["Key milestones", startup.key_milestones],
+  ] : [];
 
   return (
-    <Modal title={`Introduce ${startup.startup_name}`} onClose={onClose}>
+    <Modal title={startup ? startup.startup_name : "Startup details"} onClose={onClose} width={560}>
       <ErrorBanner text={error} />
-      <Field label="Retailer" required>
-        {retailers ? (
-          <select style={inputStyle} value={retailerId} onChange={(e) => setRetailerId(e.target.value)}>
-            <option value="">Select a retailer…</option>
-            {retailers.map((r) => <option key={r.id} value={r.id}>{r.name} — {r.category}</option>)}
-          </select>
-        ) : <Spinner />}
-      </Field>
-      <div style={{ fontFamily: FONT, fontSize: 11.5, color: "#9B958F", marginBottom: 14 }}>
-        {startup.startup_name} will be notified and must agree to RIV's charge before you can log the introduction.
-      </div>
-      <PrimaryButton disabled={busy || !retailerId} onClick={submit} style={{ width: "100%" }}>Propose introduction</PrimaryButton>
+      {!startup && !error ? <Spinner /> : startup && (
+        <div>
+          {startup.solution_summary && (
+            <div style={{ fontFamily: FONT, fontSize: 13, color: "#7A756F", marginBottom: 16, lineHeight: 1.6 }}>{startup.solution_summary}</div>
+          )}
+          {rows.filter(([, v]) => v).map(([label, value]) => (
+            <div key={label} style={{ marginBottom: 14 }}>
+              <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 11.5, color: "#9B958F", textTransform: "uppercase", letterSpacing: 0.3, marginBottom: 4 }}>{label}</div>
+              <div style={{ fontFamily: FONT, fontSize: 13, color: BRAND.ink, lineHeight: 1.6, whiteSpace: "pre-wrap" }}>{value}</div>
+            </div>
+          ))}
+          {!rows.some(([, v]) => v) && (
+            <div style={{ fontFamily: FONT, fontSize: 12.5, color: "#9B958F" }}>RIV hasn't filled in this startup's full profile yet.</div>
+          )}
+        </div>
+      )}
     </Modal>
   );
 }
@@ -446,15 +485,22 @@ function NewIntroductionModal({ startup, onClose, onCreated }) {
 /* =========================================================================
    STARTUP VIEWS
    ========================================================================= */
+// Request Intro popup (addendum §2) — fields match the Google Sheet/
+// tracker's Request Intro questionnaire exactly, plus a mandatory T&C
+// consent checkbox at the bottom.
 function RequestIntroductionModal({ retailer, onClose, onCreated }) {
-  const [agree, setAgree] = useState(false);
+  const [form, setForm] = useState({
+    whyInterested: "", problemSolved: "", relevantOffering: "", buyerPersona: "",
+    previouslyEngaged: false, priorEngagementDetails: "", supportingMaterialUrl: "",
+  });
+  const [consent, setConsent] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   async function submit() {
     setError(""); setBusy(true);
     try {
-      await api.createIntroduction({ retailerId: retailer.id, agreeToCharges: agree });
+      await api.createIntroduction({ retailerId: retailer.id, ...form, consentAccepted: consent });
       await onCreated();
       onClose();
     } catch (err) { setError(err.message); }
@@ -462,55 +508,202 @@ function RequestIntroductionModal({ retailer, onClose, onCreated }) {
   }
 
   return (
-    <Modal title={`Request introduction to ${retailer.name}`} onClose={onClose}>
+    <Modal title={`Request introduction to ${retailer.name}`} onClose={onClose} width={560}>
       <ErrorBanner text={error} />
       <div style={{ fontFamily: FONT, fontSize: 12.5, color: "#7A756F", lineHeight: 1.6, marginBottom: 14 }}>
-        {retailer.network_source === "GTM Partner"
-          ? "This retailer is in a GTM partner's network — they'll be notified and will make the introduction."
-          : "This retailer is in RIV's direct network — RIV Admin will make the introduction."}
+        RIV reviews every request before it's routed onward
+        {retailer.network_source === "GTM Partner" ? " to the introducing GTM partner." : " — this retailer is in RIV's direct network."}
       </div>
-      <label style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 18, cursor: "pointer" }}>
-        <input type="checkbox" checked={agree} onChange={(e) => setAgree(e.target.checked)} style={{ marginTop: 3 }} />
-        <span style={{ fontFamily: FONT, fontSize: 12.5, color: BRAND.ink, lineHeight: 1.6 }}>
-          I agree to RIV's introduction/closure charge on this introduction (15% on introduction, 25% on closure, unless a different rate has been agreed with RIV).
-        </span>
+      <Field label="Why interested in this enterprise" required>
+        <textarea style={{ ...inputStyle, minHeight: 60 }} value={form.whyInterested} onChange={(e) => setForm({ ...form, whyInterested: e.target.value })} />
+      </Field>
+      <Field label="Problem solved for enterprise" required>
+        <textarea style={{ ...inputStyle, minHeight: 60 }} value={form.problemSolved} onChange={(e) => setForm({ ...form, problemSolved: e.target.value })} />
+      </Field>
+      <Field label="Relevant product/offering">
+        <input style={inputStyle} value={form.relevantOffering} onChange={(e) => setForm({ ...form, relevantOffering: e.target.value })} />
+      </Field>
+      <Field label="Desired buyer persona">
+        <input style={inputStyle} value={form.buyerPersona} onChange={(e) => setForm({ ...form, buyerPersona: e.target.value })} />
+      </Field>
+      <label style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16, cursor: "pointer" }}>
+        <input type="checkbox" checked={form.previouslyEngaged} onChange={(e) => setForm({ ...form, previouslyEngaged: e.target.checked })} />
+        <span style={{ fontFamily: FONT, fontSize: 12.5, color: BRAND.ink }}>Previously engaged with this enterprise</span>
       </label>
-      <PrimaryButton disabled={busy || !agree} onClick={submit} style={{ width: "100%" }}>Submit request</PrimaryButton>
+      {form.previouslyEngaged && (
+        <Field label="Prior engagement details">
+          <textarea style={{ ...inputStyle, minHeight: 50 }} value={form.priorEngagementDetails} onChange={(e) => setForm({ ...form, priorEngagementDetails: e.target.value })} />
+        </Field>
+      )}
+      <Field label="Supporting material URL">
+        <input style={inputStyle} value={form.supportingMaterialUrl} onChange={(e) => setForm({ ...form, supportingMaterialUrl: e.target.value })} />
+      </Field>
+
+      <div style={{ borderTop: `1px solid ${BRAND.line}`, marginTop: 8, paddingTop: 16 }}>
+        <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12.5, marginBottom: 8 }}>Terms &amp; Conditions</div>
+        <div style={{ fontFamily: FONT, fontSize: 11.5, color: "#9B958F", lineHeight: 1.6, marginBottom: 12 }}>
+          By submitting, you agree to RIV's introduction/closure charge on any resulting deal (15% on introduction, 25% on closure, unless a different rate has been agreed with RIV), and confirm the information above is accurate to the best of your knowledge.
+        </div>
+        <label style={{ display: "flex", alignItems: "flex-start", gap: 10, marginBottom: 18, cursor: "pointer" }}>
+          <input type="checkbox" checked={consent} onChange={(e) => setConsent(e.target.checked)} style={{ marginTop: 3 }} />
+          <span style={{ fontFamily: FONT, fontSize: 12.5, color: BRAND.ink, lineHeight: 1.6 }}>I have read and agree to the Terms &amp; Conditions.</span>
+        </label>
+      </div>
+      <PrimaryButton disabled={busy || !consent || !form.whyInterested || !form.problemSolved} onClick={submit} style={{ width: "100%" }}>Submit request</PrimaryButton>
     </Modal>
   );
 }
 
+// Retailer Directory (startup browsing) / My Retailers (partner) — same
+// list endpoint, different framing and actions per role (addendum §1).
 function RetailerDirectoryView({ user, onRequest }) {
   const [retailers, setRetailers] = useState(null);
   const [error, setError] = useState("");
-  useEffect(() => { api.getRetailers().then((r) => setRetailers(r.retailers)).catch((e) => setError(e.message)); }, []);
+  const load = useCallback(() => api.getRetailers().then((r) => setRetailers(r.retailers)).catch((e) => setError(e.message)), []);
+  useEffect(() => { load(); }, [load]);
   if (error) return <ErrorBanner text={error} />;
   if (!retailers) return <Spinner />;
-  if (!retailers.length) return <EmptyState icon={Building2} title="No retailers in the directory yet" text="RIV Admin maintains the retailer directory." />;
+  if (!retailers.length) return (
+    <EmptyState icon={Building2} title={user.role === "partner" ? "No retailers yet" : "No retailers in the directory yet"}
+      text={user.role === "partner" ? "Use Add Retailer above to submit one for RIV's review." : "RIV Admin maintains the retailer directory."} />
+  );
   return (
     <div>
       {retailers.map((r) => (
         <Card key={r.id} style={{ padding: 16, marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14 }}>
           <div>
-            <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 14, color: BRAND.ink }}>{r.name}</div>
-            <div style={{ fontFamily: FONT, fontSize: 12, color: "#9B958F", marginTop: 3 }}>{r.category} · {r.location}</div>
+            <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 14, color: BRAND.ink }}>{r.brand || r.name}</div>
+            <div style={{ fontFamily: FONT, fontSize: 12, color: "#9B958F", marginTop: 3 }}>{r.category} · {r.location}{r.hq_country ? `, ${r.hq_country}` : ""}</div>
             <div style={{ fontFamily: FONT, fontSize: 11, color: "#B7B2AE", marginTop: 5 }}>{r.network_source === "GTM Partner" ? "Partner network" : "RIV direct"}</div>
           </div>
-          {user.role === "startup" && <PrimaryButton icon={Send} onClick={() => onRequest(r)} style={{ flexShrink: 0 }}>Request intro</PrimaryButton>}
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+            {user.role === "partner" && <StatusBadge status={r.status === "Active in network" ? "RIV Approved" : "Pending RIV Approval"} colors={APPROVAL_COLORS} />}
+            {user.role === "startup" && <PrimaryButton icon={Send} onClick={() => onRequest(r)}>Request intro</PrimaryButton>}
+          </div>
         </Card>
       ))}
     </div>
   );
 }
 
-function IntroductionsListView({ onOpen, refreshKey }) {
+// Add Retailer (addendum §1) — fields mirror the RISE Introduction
+// Submission Form (Bigin) in full for the retailer/enterprise side.
+function AddRetailerModal({ onClose, onCreated }) {
+  const [form, setForm] = useState({
+    name: "", brand: "", website: "", location: "", hqCountry: "", category: "",
+    contactName: "", contactDesignation: "", contactEmail: "", contactPhone: "",
+  });
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function submit() {
+    setError(""); setBusy(true);
+    try { await api.addRetailer(form); await onCreated(); onClose(); }
+    catch (err) { setError(err.message); }
+    finally { setBusy(false); }
+  }
+
+  return (
+    <Modal title="Add Retailer" onClose={onClose} width={520}>
+      <ErrorBanner text={error} />
+      <div style={{ fontFamily: FONT, fontSize: 11.5, color: "#9B958F", marginBottom: 14, lineHeight: 1.6 }}>
+        Submissions are reviewed by RIV before appearing in the approved directory.
+      </div>
+      <Field label="Retail enterprise you are referring" required><input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
+      <Field label="Brand you are introducing to"><input style={inputStyle} value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} /></Field>
+      <Field label="Website"><input style={inputStyle} value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} /></Field>
+      <Field label="City where enterprise is headquartered"><input style={inputStyle} value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></Field>
+      <Field label="HQ country"><input style={inputStyle} value={form.hqCountry} onChange={(e) => setForm({ ...form, hqCountry: e.target.value })} /></Field>
+      <Field label="Retail segment"><input style={inputStyle} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /></Field>
+      <Field label="Enterprise contact — full name"><input style={inputStyle} value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })} /></Field>
+      <Field label="Enterprise contact — designation"><input style={inputStyle} value={form.contactDesignation} onChange={(e) => setForm({ ...form, contactDesignation: e.target.value })} /></Field>
+      <Field label="Enterprise contact — email"><input style={inputStyle} type="email" value={form.contactEmail} onChange={(e) => setForm({ ...form, contactEmail: e.target.value })} /></Field>
+      <Field label="Enterprise contact — phone"><input style={inputStyle} value={form.contactPhone} onChange={(e) => setForm({ ...form, contactPhone: e.target.value })} /></Field>
+      <PrimaryButton onClick={submit} disabled={busy || !form.name} style={{ width: "100%" }}>Submit for review</PrimaryButton>
+    </Modal>
+  );
+}
+
+// Startup Retailer Introductions / "My Introduction Requests" (addendum
+// §2) — Introduction Request Status, Deal Status, and Opportunity Value
+// columns, the latter two directly editable by the startup here.
+function IntroductionsListView({ onOpen, onRequestIntro, refreshKey }) {
+  const [intros, setIntros] = useState(null);
+  const [error, setError] = useState("");
+  const load = useCallback(() => api.getIntroductions().then((r) => setIntros(r.introductions)).catch((e) => setError(e.message)), []);
+  useEffect(() => { load(); }, [load, refreshKey]);
+
+  async function saveOpportunity(id, patch) {
+    setError("");
+    try { await api.updateOpportunity(id, patch); load(); }
+    catch (e) { setError(e.message); }
+  }
+
+  return (
+    <div>
+      <ErrorBanner text={error} />
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 14 }}>
+        <PrimaryButton icon={Send} onClick={onRequestIntro}>Request Intro</PrimaryButton>
+      </div>
+      {!intros ? <Spinner /> : !intros.length ? (
+        <EmptyState icon={ClipboardList} title="No introduction requests yet" text="Use Request Intro to ask RIV to route you to a retailer." />
+      ) : intros.map((i) => (
+        <Card key={i.id} style={{ padding: 16, marginBottom: 10 }}>
+          <div onClick={() => onOpen(i)} style={{ cursor: "pointer", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 14, color: BRAND.ink }}>{i.retailer_name}</div>
+              <div style={{ fontFamily: FONT, fontSize: 12, color: "#9B958F", marginTop: 3 }}>
+                {i.partner_name ? `via ${i.partner_name}` : "RIV direct"} · Requested {dateStr(i.request_date)}
+              </div>
+            </div>
+            <StatusBadge status={i.approval_status} colors={APPROVAL_COLORS} />
+          </div>
+          <div style={{ display: "flex", gap: 10, marginTop: 12, flexWrap: "wrap" }}>
+            <div style={{ flex: "1 1 160px" }}>
+              <div style={{ fontFamily: FONT, fontSize: 11, color: "#9B958F", marginBottom: 4 }}>Deal Status</div>
+              <select style={inputStyle} value={i.engagement_stage || ""} onChange={(e) => saveOpportunity(i.id, { dealStatus: e.target.value })}>
+                <option value="">—</option>
+                {DEAL_STATUS_OPTIONS.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div style={{ flex: "1 1 160px" }}>
+              <div style={{ fontFamily: FONT, fontSize: 11, color: "#9B958F", marginBottom: 4 }}>Opportunity Value (USD)</div>
+              <input style={inputStyle} type="number" defaultValue={i.opportunity_value || ""} onBlur={(e) => e.target.value !== String(i.opportunity_value || "") && saveOpportunity(i.id, { opportunityValue: e.target.value || null })} />
+            </div>
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+// GTM Partner's "Introduction Requests" tab (addendum §1) — read-only:
+// startup-initiated requests that have been routed through RIV into this
+// partner's network. Retailer / Introduction Request Status / Deal Status,
+// as specified.
+function PartnerIntroductionRequestsView({ refreshKey }) {
   const [intros, setIntros] = useState(null);
   const [error, setError] = useState("");
   useEffect(() => { api.getIntroductions().then((r) => setIntros(r.introductions)).catch((e) => setError(e.message)); }, [refreshKey]);
   if (error) return <ErrorBanner text={error} />;
   if (!intros) return <Spinner />;
-  if (!intros.length) return <EmptyState icon={ClipboardList} title="No introductions yet" text="Introductions you make or request will show up here with live status." />;
-  return <div>{intros.map((i) => <IntroCard key={i.id} intro={i} onOpen={onOpen} />)}</div>;
+  if (!intros.length) return <EmptyState icon={ClipboardList} title="No introduction requests yet" text="Requests routed to you by RIV will appear here." />;
+  return (
+    <div>
+      {intros.map((i) => (
+        <Card key={i.id} style={{ padding: 16, marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 14, color: BRAND.ink }}>{i.retailer_name}</div>
+            <div style={{ fontFamily: FONT, fontSize: 12, color: "#9B958F", marginTop: 3 }}>{i.startup_name} · Requested {dateStr(i.request_date)}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8 }}>
+            <StatusBadge status={i.approval_status} colors={APPROVAL_COLORS} />
+            {i.engagement_stage && <StatusBadge status={i.engagement_stage} />}
+          </div>
+        </Card>
+      ))}
+    </div>
+  );
 }
 
 /* =========================================================================
@@ -631,16 +824,22 @@ function AdminStartupsView() {
   const [startups, setStartups] = useState(null);
   const [error, setError] = useState("");
   const [showNew, setShowNew] = useState(false);
-  const [form, setForm] = useState({ startupName: "", founderName: "", email: "", sector: "", solutionSummary: "" });
+  const blankForm = {
+    startupName: "", founderName: "", email: "", sector: "", solutionSummary: "",
+    problemDescription: "", solutionDescription: "", topBenefits: "", techStack: "", subVertical: "",
+    competition: "", competitiveAdvantage: "", payingCustomerCount: "", notableCustomers: "", keyMilestones: "",
+  };
+  const [form, setForm] = useState(blankForm);
   const [provisioning, setProvisioning] = useState(null);
   const [pwField, setPwField] = useState("");
+  const [detailStartupId, setDetailStartupId] = useState(null);
 
   const load = useCallback(() => api.listStartups().then((r) => setStartups(r.startups)).catch((e) => setError(e.message)), []);
   useEffect(() => { load(); }, [load]);
 
   async function createStartup() {
     setError("");
-    try { await api.createStartup(form); setShowNew(false); setForm({ startupName: "", founderName: "", email: "", sector: "", solutionSummary: "" }); load(); }
+    try { await api.createStartup(form); setShowNew(false); setForm(blankForm); load(); }
     catch (e) { setError(e.message); }
   }
   async function provision(s) {
@@ -664,27 +863,42 @@ function AdminStartupsView() {
             <div style={{ fontFamily: FONT, fontSize: 12, color: "#9B958F", marginTop: 3 }}>{s.email} · {s.sector || "—"}</div>
             <div style={{ fontFamily: FONT, fontSize: 11, color: "#B7B2AE", marginTop: 5 }}>Stage: {s.onboarding_stage} · Fee: {s.participation_fee_status} · Login: {s.portal_login_status}</div>
           </div>
-          {s.portal_login_status !== "Provisioned" && (
-            provisioning === s.id ? (
-              <div style={{ display: "flex", gap: 8 }}>
-                <input style={{ ...inputStyle, width: 150 }} placeholder="Temp password" value={pwField} onChange={(e) => setPwField(e.target.value)} />
-                <PrimaryButton onClick={() => provision(s)} disabled={pwField.length < 8}>Provision</PrimaryButton>
-              </div>
-            ) : <GhostButton onClick={() => setProvisioning(s.id)}>Provision login</GhostButton>
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+            <GhostButton onClick={() => setDetailStartupId(s.id)}>View Details</GhostButton>
+            {s.portal_login_status !== "Provisioned" && (
+              provisioning === s.id ? (
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input style={{ ...inputStyle, width: 150 }} placeholder="Temp password" value={pwField} onChange={(e) => setPwField(e.target.value)} />
+                  <PrimaryButton onClick={() => provision(s)} disabled={pwField.length < 8}>Provision</PrimaryButton>
+                </div>
+              ) : <GhostButton onClick={() => setProvisioning(s.id)}>Provision login</GhostButton>
+            )}
+          </div>
         </Card>
       ))}
       {showNew && (
-        <Modal title="New RISE startup" onClose={() => setShowNew(false)}>
+        <Modal title="New RISE startup" onClose={() => setShowNew(false)} width={560}>
           <ErrorBanner text={error} />
           <Field label="Startup name" required><input style={inputStyle} value={form.startupName} onChange={(e) => setForm({ ...form, startupName: e.target.value })} /></Field>
           <Field label="Founder name"><input style={inputStyle} value={form.founderName} onChange={(e) => setForm({ ...form, founderName: e.target.value })} /></Field>
           <Field label="Email" required><input style={inputStyle} type="email" value={form.email} onChange={(e) => setForm({ ...form, email: e.target.value })} /></Field>
           <Field label="Sector"><input style={inputStyle} value={form.sector} onChange={(e) => setForm({ ...form, sector: e.target.value })} /></Field>
           <Field label="Solution summary"><textarea style={{ ...inputStyle, minHeight: 70 }} value={form.solutionSummary} onChange={(e) => setForm({ ...form, solutionSummary: e.target.value })} /></Field>
+          <div style={{ fontFamily: FONT, fontWeight: 600, fontSize: 12.5, color: BRAND.ink, margin: "18px 0 10px", borderTop: `1px solid ${BRAND.line}`, paddingTop: 14 }}>Startup Detail View fields</div>
+          <Field label="Problem description"><textarea style={{ ...inputStyle, minHeight: 60 }} value={form.problemDescription} onChange={(e) => setForm({ ...form, problemDescription: e.target.value })} /></Field>
+          <Field label="Solution"><textarea style={{ ...inputStyle, minHeight: 60 }} value={form.solutionDescription} onChange={(e) => setForm({ ...form, solutionDescription: e.target.value })} /></Field>
+          <Field label="Top 3 benefits"><input style={inputStyle} value={form.topBenefits} onChange={(e) => setForm({ ...form, topBenefits: e.target.value })} /></Field>
+          <Field label="Tech stack"><input style={inputStyle} value={form.techStack} onChange={(e) => setForm({ ...form, techStack: e.target.value })} /></Field>
+          <Field label="Sub-vertical"><input style={inputStyle} value={form.subVertical} onChange={(e) => setForm({ ...form, subVertical: e.target.value })} /></Field>
+          <Field label="Competition"><textarea style={{ ...inputStyle, minHeight: 50 }} value={form.competition} onChange={(e) => setForm({ ...form, competition: e.target.value })} /></Field>
+          <Field label="Competitive advantage"><textarea style={{ ...inputStyle, minHeight: 50 }} value={form.competitiveAdvantage} onChange={(e) => setForm({ ...form, competitiveAdvantage: e.target.value })} /></Field>
+          <Field label="Paying customer count"><input style={inputStyle} value={form.payingCustomerCount} onChange={(e) => setForm({ ...form, payingCustomerCount: e.target.value })} /></Field>
+          <Field label="Notable customers"><input style={inputStyle} value={form.notableCustomers} onChange={(e) => setForm({ ...form, notableCustomers: e.target.value })} /></Field>
+          <Field label="Key milestones"><textarea style={{ ...inputStyle, minHeight: 50 }} value={form.keyMilestones} onChange={(e) => setForm({ ...form, keyMilestones: e.target.value })} /></Field>
           <PrimaryButton onClick={createStartup} disabled={!form.startupName || !form.email} style={{ width: "100%" }}>Create startup</PrimaryButton>
         </Modal>
       )}
+      {detailStartupId && <StartupDetailModal startupId={detailStartupId} onClose={() => setDetailStartupId(null)} />}
     </div>
   );
 }
@@ -694,7 +908,7 @@ function AdminRetailersView() {
   const [partners, setPartners] = useState([]);
   const [error, setError] = useState("");
   const [showNew, setShowNew] = useState(false);
-  const [form, setForm] = useState({ name: "", category: "", location: "", networkSource: "RIV Direct", owningPartnerId: "", contactName: "", contactEmail: "", contactPhone: "" });
+  const [form, setForm] = useState({ name: "", brand: "", website: "", hqCountry: "", category: "", location: "", networkSource: "RIV Direct", owningPartnerId: "", contactName: "", contactDesignation: "", contactEmail: "", contactPhone: "" });
 
   const load = useCallback(() => api.listRetailersAdmin().then((r) => setRetailers(r.retailers)).catch((e) => setError(e.message)), []);
   useEffect(() => { load(); api.listPartners().then((r) => setPartners(r.partners)).catch(() => {}); }, [load]);
@@ -704,9 +918,14 @@ function AdminRetailersView() {
     try {
       await api.createRetailer({ ...form, owningPartnerId: form.owningPartnerId || null });
       setShowNew(false);
-      setForm({ name: "", category: "", location: "", networkSource: "RIV Direct", owningPartnerId: "", contactName: "", contactEmail: "", contactPhone: "" });
+      setForm({ name: "", brand: "", website: "", hqCountry: "", category: "", location: "", networkSource: "RIV Direct", owningPartnerId: "", contactName: "", contactDesignation: "", contactEmail: "", contactPhone: "" });
       load();
     } catch (e) { setError(e.message); }
+  }
+  async function approve(id) {
+    setError("");
+    try { await api.approveRetailer(id); load(); }
+    catch (e) { setError(e.message); }
   }
 
   if (error) return <ErrorBanner text={error} />;
@@ -719,17 +938,28 @@ function AdminRetailersView() {
         <EmptyState icon={Building2} title="No retailers yet" text="Add a retailer to build out the directory." />
       ) : retailers.map((r) => (
         <Card key={r.id} style={{ padding: 16, marginBottom: 10 }}>
-          <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 14, color: BRAND.ink }}>{r.name}</div>
-          <div style={{ fontFamily: FONT, fontSize: 12, color: "#9B958F", marginTop: 3 }}>{r.category} · {r.location} · {r.network_source}{r.owning_partner_name ? ` (${r.owning_partner_name})` : ""}</div>
-          <div style={{ fontFamily: FONT, fontSize: 11, color: "#B7B2AE", marginTop: 5 }}>Contact: {r.contact_name || "—"} · {r.contact_email || "—"} · {r.contact_phone || "—"}</div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 14, color: BRAND.ink }}>{r.brand || r.name}</div>
+              <div style={{ fontFamily: FONT, fontSize: 12, color: "#9B958F", marginTop: 3 }}>{r.category} · {r.location}{r.hq_country ? `, ${r.hq_country}` : ""} · {r.network_source}{r.owning_partner_name ? ` (${r.owning_partner_name})` : ""}</div>
+              <div style={{ fontFamily: FONT, fontSize: 11, color: "#B7B2AE", marginTop: 5 }}>Contact: {r.contact_name || "—"}{r.contact_designation ? ` (${r.contact_designation})` : ""} · {r.contact_email || "—"} · {r.contact_phone || "—"}</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+              <StatusBadge status={r.status} />
+              {r.status !== "Active in network" && <PrimaryButton onClick={() => approve(r.id)}>Approve</PrimaryButton>}
+            </div>
+          </div>
         </Card>
       ))}
       {showNew && (
         <Modal title="New retailer" onClose={() => setShowNew(false)}>
           <ErrorBanner text={error} />
           <Field label="Name" required><input style={inputStyle} value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></Field>
+          <Field label="Brand"><input style={inputStyle} value={form.brand} onChange={(e) => setForm({ ...form, brand: e.target.value })} /></Field>
+          <Field label="Website"><input style={inputStyle} value={form.website} onChange={(e) => setForm({ ...form, website: e.target.value })} /></Field>
           <Field label="Category"><input style={inputStyle} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} /></Field>
           <Field label="Location"><input style={inputStyle} value={form.location} onChange={(e) => setForm({ ...form, location: e.target.value })} /></Field>
+          <Field label="HQ country"><input style={inputStyle} value={form.hqCountry} onChange={(e) => setForm({ ...form, hqCountry: e.target.value })} /></Field>
           <Field label="Network source">
             <select style={inputStyle} value={form.networkSource} onChange={(e) => setForm({ ...form, networkSource: e.target.value })}>
               <option>RIV Direct</option><option>GTM Partner</option>
@@ -744,6 +974,7 @@ function AdminRetailersView() {
             </Field>
           )}
           <Field label="Contact name"><input style={inputStyle} value={form.contactName} onChange={(e) => setForm({ ...form, contactName: e.target.value })} /></Field>
+          <Field label="Contact designation"><input style={inputStyle} value={form.contactDesignation} onChange={(e) => setForm({ ...form, contactDesignation: e.target.value })} /></Field>
           <Field label="Contact email"><input style={inputStyle} value={form.contactEmail} onChange={(e) => setForm({ ...form, contactEmail: e.target.value })} /></Field>
           <Field label="Contact phone"><input style={inputStyle} value={form.contactPhone} onChange={(e) => setForm({ ...form, contactPhone: e.target.value })} /></Field>
           <PrimaryButton onClick={createRetailer} disabled={!form.name} style={{ width: "100%" }}>Create retailer</PrimaryButton>
@@ -763,6 +994,21 @@ function AdminIntroductionsView() {
   async function setStatus(id, status) {
     setError("");
     try { await api.updateIntroductionAdmin(id, { status }); load(); }
+    catch (e) { setError(e.message); }
+  }
+  async function approve(id) {
+    setError("");
+    try { await api.approveIntroduction(id); load(); }
+    catch (e) { setError(e.message); }
+  }
+  async function reject(id) {
+    setError("");
+    try { await api.rejectIntroduction(id); load(); }
+    catch (e) { setError(e.message); }
+  }
+  async function logProofDirect(id, proofOfIntroduction) {
+    setError("");
+    try { await api.updateIntroductionAdmin(id, { approvalStatus: "Proof Recorded", proofOfIntroduction, status: "Introduced" }); load(); }
     catch (e) { setError(e.message); }
   }
 
@@ -786,8 +1032,20 @@ function AdminIntroductionsView() {
                 {i.partner_name ? `via ${i.partner_name}` : "RIV direct"} · Requested {dateStr(i.request_date)}{i.deal_value ? ` · Deal ${money(i.deal_value)} · Fee ${money(i.fee_amount_due)}` : ""}
               </div>
             </div>
-            <StatusBadge status={i.status} />
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <StatusBadge status={i.approval_status} colors={APPROVAL_COLORS} />
+              <StatusBadge status={i.status} />
+            </div>
           </div>
+          {i.approval_status === "Pending RIV Approval" && (
+            <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+              <PrimaryButton onClick={() => approve(i.id)}>Approve</PrimaryButton>
+              <GhostButton onClick={() => reject(i.id)}>Reject</GhostButton>
+            </div>
+          )}
+          {!i.partner_id && i.approval_status === "Startup Confirmed" && (
+            <RivDirectProofRow onSubmit={(proof) => logProofDirect(i.id, proof)} />
+          )}
           <div style={{ marginTop: 10 }}>
             <select style={{ ...inputStyle, width: 260 }} value={i.status} onChange={(e) => setStatus(i.id, e.target.value)}>
               {Object.keys(STATUS_COLORS).map((s) => <option key={s} value={s}>{s}</option>)}
@@ -795,6 +1053,18 @@ function AdminIntroductionsView() {
           </div>
         </Card>
       ))}
+    </div>
+  );
+}
+
+// Inline "log the introduction myself" row for admin — only needed on RIV
+// Direct introductions, where there's no GTM partner login to do it.
+function RivDirectProofRow({ onSubmit }) {
+  const [proof, setProof] = useState("");
+  return (
+    <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+      <input style={{ ...inputStyle, flex: 1 }} placeholder="Proof of introduction (RIV Direct — no partner to log this)" value={proof} onChange={(e) => setProof(e.target.value)} />
+      <PrimaryButton disabled={!proof} onClick={() => onSubmit(proof)}>Log introduction</PrimaryButton>
     </div>
   );
 }
@@ -869,6 +1139,32 @@ function AdminPayoutsView() {
   );
 }
 
+// Small retailer picker shown when a startup clicks "Request Intro" from
+// the Startup Retailer Introductions tab directly (rather than from a
+// specific retailer card in the directory) — selecting one hands off to
+// the full RequestIntroductionModal questionnaire.
+function SelectRetailerForIntroModal({ onSelect, onClose }) {
+  const [retailers, setRetailers] = useState(null);
+  const [error, setError] = useState("");
+  useEffect(() => { api.getRetailers().then((r) => setRetailers(r.retailers)).catch((e) => setError(e.message)); }, []);
+  return (
+    <Modal title="Select a retailer" onClose={onClose}>
+      <ErrorBanner text={error} />
+      {!retailers ? <Spinner /> : !retailers.length ? (
+        <EmptyState icon={Building2} title="No approved retailers yet" text="Check back once RIV has approved retailers into the network." />
+      ) : retailers.map((r) => (
+        <Card key={r.id} onClick={() => onSelect(r)} style={{ padding: 14, marginBottom: 8, cursor: "pointer", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div>
+            <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 13.5, color: BRAND.ink }}>{r.brand || r.name}</div>
+            <div style={{ fontFamily: FONT, fontSize: 11.5, color: "#9B958F" }}>{r.category} · {r.location}</div>
+          </div>
+          <ArrowRight size={14} color="#B7B2AE" />
+        </Card>
+      ))}
+    </Modal>
+  );
+}
+
 /* =========================================================================
    ROOT
    ========================================================================= */
@@ -876,8 +1172,10 @@ export default function RiseGtmApp() {
   const [user, setUser] = useState(() => getStoredUser());
   const [view, setView] = useState(null);
   const [openIntro, setOpenIntro] = useState(null);
-  const [introduceStartup, setIntroduceStartup] = useState(null);
   const [requestRetailer, setRequestRetailer] = useState(null);
+  const [pickingRetailer, setPickingRetailer] = useState(false);
+  const [showAddRetailer, setShowAddRetailer] = useState(false);
+  const [detailStartupId, setDetailStartupId] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
@@ -903,16 +1201,17 @@ export default function RiseGtmApp() {
   return (
     <div style={{ minHeight: "100vh", background: BRAND.cream }}>
       <GlobalStyle />
-      <NavBar view={view} setView={setView} user={user} onLogout={logout} />
+      <NavBar view={view} setView={setView} user={user} onLogout={logout} onAddRetailer={() => setShowAddRetailer(true)} />
       <div style={{ maxWidth: 1160, margin: "0 auto", padding: "28px 24px 60px" }}>
         <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 20, color: BRAND.ink, marginBottom: 18, textTransform: "capitalize" }}>
           {view?.replace(/-/g, " ")}
         </div>
 
-        {user.role === "partner" && view === "startups" && <PartnerStartupsView onIntroduce={setIntroduceStartup} />}
+        {user.role === "partner" && view === "startups" && <PartnerStartupsView onViewDetails={setDetailStartupId} />}
         {user.role === "partner" && view === "retailers" && <RetailerDirectoryView user={user} onRequest={() => {}} />}
-        {(user.role === "partner" || user.role === "startup") && view === "introductions" && (
-          <IntroductionsListView onOpen={setOpenIntro} refreshKey={refreshKey} />
+        {user.role === "partner" && view === "requests" && <PartnerIntroductionRequestsView refreshKey={refreshKey} />}
+        {user.role === "startup" && view === "introductions" && (
+          <IntroductionsListView onOpen={setOpenIntro} onRequestIntro={() => setPickingRetailer(true)} refreshKey={refreshKey} />
         )}
         {user.role === "startup" && view === "retailers" && <RetailerDirectoryView user={user} onRequest={setRequestRetailer} />}
 
@@ -926,8 +1225,12 @@ export default function RiseGtmApp() {
       </div>
 
       {openIntro && <IntroDetailModal intro={openIntro} user={user} onClose={() => setOpenIntro(null)} onRefresh={async () => refresh()} />}
-      {introduceStartup && <NewIntroductionModal startup={introduceStartup} onClose={() => setIntroduceStartup(null)} onCreated={async () => refresh()} />}
       {requestRetailer && <RequestIntroductionModal retailer={requestRetailer} onClose={() => setRequestRetailer(null)} onCreated={async () => refresh()} />}
+      {pickingRetailer && (
+        <SelectRetailerForIntroModal onClose={() => setPickingRetailer(false)} onSelect={(r) => { setPickingRetailer(false); setRequestRetailer(r); }} />
+      )}
+      {showAddRetailer && <AddRetailerModal onClose={() => setShowAddRetailer(false)} onCreated={async () => refresh()} />}
+      {detailStartupId && <StartupDetailModal startupId={detailStartupId} onClose={() => setDetailStartupId(null)} />}
     </div>
   );
 }
