@@ -3,7 +3,7 @@
 // visibility). Mounted at /api/admin, requireAdmin throughout.
 const { Router } = require("express");
 const bcrypt = require("bcryptjs");
-const { pool, INTRODUCTION_STATUSES } = require("../db.js");
+const { pool, INTRODUCTION_STATUSES, APPROVAL_STATUSES, DEAL_STATUSES } = require("../db.js");
 const { requireAuth, requireAdmin } = require("../middleware/auth.js");
 
 const router = Router();
@@ -139,12 +139,21 @@ router.get("/startups", async (req, res, next) => {
 
 router.post("/startups", async (req, res, next) => {
   try {
-    const { startupName, founderName, email, phone, sector, solutionSummary, riv_owner } = req.body || {};
+    const {
+      startupName, founderName, email, phone, sector, solutionSummary, riv_owner,
+      problemDescription, solutionDescription, topBenefits, techStack, subVertical,
+      competition, competitiveAdvantage, payingCustomerCount, notableCustomers, keyMilestones,
+    } = req.body || {};
     if (!startupName || !email) return res.status(400).json({ error: "startupName and email are required." });
     const { rows } = await pool.query(
-      `INSERT INTO startups (startup_name, founder_name, email, phone, sector, solution_summary, riv_owner)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [startupName, founderName || null, email, phone || null, sector || null, solutionSummary || null, riv_owner || null]
+      `INSERT INTO startups
+         (startup_name, founder_name, email, phone, sector, solution_summary, riv_owner,
+          problem_description, solution_description, top_benefits, tech_stack, sub_vertical,
+          competition, competitive_advantage, paying_customer_count, notable_customers, key_milestones)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17) RETURNING *`,
+      [startupName, founderName || null, email, phone || null, sector || null, solutionSummary || null, riv_owner || null,
+       problemDescription || null, solutionDescription || null, topBenefits || null, techStack || null, subVertical || null,
+       competition || null, competitiveAdvantage || null, payingCustomerCount || null, notableCustomers || null, keyMilestones || null]
     );
     res.status(201).json({ startup: rows[0] });
   } catch (err) {
@@ -163,12 +172,18 @@ router.put("/startups/:id", async (req, res, next) => {
          agreement_signed_date = COALESCE($9, agreement_signed_date), participation_fee_status = COALESCE($10, participation_fee_status),
          participation_fee_due_date = COALESCE($11, participation_fee_due_date), equity_pct = COALESCE($12, equity_pct),
          revenue_share_override = $13, riv_owner = COALESCE($14, riv_owner), status = COALESCE($15, status), notes = COALESCE($16, notes),
-         updated_at = now()
+         problem_description = COALESCE($17, problem_description), solution_description = COALESCE($18, solution_description),
+         top_benefits = COALESCE($19, top_benefits), tech_stack = COALESCE($20, tech_stack), sub_vertical = COALESCE($21, sub_vertical),
+         competition = COALESCE($22, competition), competitive_advantage = COALESCE($23, competitive_advantage),
+         paying_customer_count = COALESCE($24, paying_customer_count), notable_customers = COALESCE($25, notable_customers),
+         key_milestones = COALESCE($26, key_milestones), updated_at = now()
        WHERE id = $1 RETURNING *`,
       [
         req.params.id, f.startupName, f.founderName, f.phone, f.sector, f.solutionSummary,
         f.onboardingStage, f.agreementLink, f.agreementSignedDate, f.participationFeeStatus,
         f.participationFeeDueDate, f.equityPct, f.revenueShareOverride ?? null, f.riv_owner, f.status, f.notes,
+        f.problemDescription, f.solutionDescription, f.topBenefits, f.techStack, f.subVertical,
+        f.competition, f.competitiveAdvantage, f.payingCustomerCount, f.notableCustomers, f.keyMilestones,
       ]
     );
     if (!rows[0]) return res.status(404).json({ error: "Startup not found." });
@@ -228,14 +243,38 @@ router.get("/retailers", async (req, res, next) => {
 
 router.post("/retailers", async (req, res, next) => {
   try {
-    const { name, category, location, networkSource, owningPartnerId, contactName, contactEmail, contactPhone, riv_owner } = req.body || {};
+    const {
+      name, brand, website, hqCountry, category, location, networkSource, owningPartnerId,
+      contactName, contactDesignation, contactEmail, contactPhone, riv_owner,
+    } = req.body || {};
     if (!name) return res.status(400).json({ error: "name is required." });
     const { rows } = await pool.query(
-      `INSERT INTO retailers (name, category, location, network_source, owning_partner_id, contact_name, contact_email, contact_phone, riv_owner)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [name, category || null, location || null, networkSource || "RIV Direct", owningPartnerId || null, contactName || null, contactEmail || null, contactPhone || null, riv_owner || null]
+      `INSERT INTO retailers
+         (name, brand, website, hq_country, category, location, network_source, owning_partner_id,
+          contact_name, contact_designation, contact_email, contact_phone, riv_owner)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING *`,
+      [name, brand || null, website || null, hqCountry || null, category || null, location || null,
+       networkSource || "RIV Direct", owningPartnerId || null, contactName || null, contactDesignation || null,
+       contactEmail || null, contactPhone || null, riv_owner || null]
     );
     res.status(201).json({ retailer: rows[0] });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/admin/retailers/:id/approve — flips a partner-submitted
+// Prospect into the approved network in one click (addendum §1's "RIV
+// approves" step for retailer submissions, distinct from the introduction
+// approval endpoints below).
+router.put("/retailers/:id/approve", async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `UPDATE retailers SET status = 'Active in network' WHERE id = $1 RETURNING *`,
+      [req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Retailer not found." });
+    res.json({ retailer: rows[0] });
   } catch (err) {
     next(err);
   }
@@ -246,12 +285,15 @@ router.put("/retailers/:id", async (req, res, next) => {
     const f = req.body || {};
     const { rows } = await pool.query(
       `UPDATE retailers SET
-         name = COALESCE($2, name), category = COALESCE($3, category), location = COALESCE($4, location),
-         network_source = COALESCE($5, network_source), owning_partner_id = $6,
-         contact_name = COALESCE($7, contact_name), contact_email = COALESCE($8, contact_email), contact_phone = COALESCE($9, contact_phone),
-         riv_owner = COALESCE($10, riv_owner), status = COALESCE($11, status)
+         name = COALESCE($2, name), brand = COALESCE($3, brand), website = COALESCE($4, website),
+         hq_country = COALESCE($5, hq_country), category = COALESCE($6, category), location = COALESCE($7, location),
+         network_source = COALESCE($8, network_source), owning_partner_id = $9,
+         contact_name = COALESCE($10, contact_name), contact_designation = COALESCE($11, contact_designation),
+         contact_email = COALESCE($12, contact_email), contact_phone = COALESCE($13, contact_phone),
+         riv_owner = COALESCE($14, riv_owner), status = COALESCE($15, status)
        WHERE id = $1 RETURNING *`,
-      [req.params.id, f.name, f.category, f.location, f.networkSource, f.owningPartnerId ?? null, f.contactName, f.contactEmail, f.contactPhone, f.riv_owner, f.status]
+      [req.params.id, f.name, f.brand, f.website, f.hqCountry, f.category, f.location, f.networkSource,
+       f.owningPartnerId ?? null, f.contactName, f.contactDesignation, f.contactEmail, f.contactPhone, f.riv_owner, f.status]
     );
     if (!rows[0]) return res.status(404).json({ error: "Retailer not found." });
     res.json({ retailer: rows[0] });
@@ -310,21 +352,81 @@ router.post("/introductions", async (req, res, next) => {
   }
 });
 
+// PUT /api/admin/introductions/:id/approve — RIV reviews and approves a
+// request (addendum §3, step 2). Skips straight to "Startup Confirmed"
+// when there's no GTM partner in the loop (RIV Direct retailer) since
+// there's no one to notify in between; otherwise notifies the partner and
+// waits for the startup's separate confirm-request call.
+router.put("/introductions/:id/approve", async (req, res, next) => {
+  try {
+    const { rows: introRows } = await pool.query("SELECT * FROM introductions WHERE id = $1", [req.params.id]);
+    const intro = introRows[0];
+    if (!intro) return res.status(404).json({ error: "Introduction not found." });
+    if (intro.approval_status !== "Pending RIV Approval") {
+      return res.status(400).json({ error: `Cannot approve from approval status "${intro.approval_status}".` });
+    }
+    const nextStatus = intro.partner_id ? "GTM Notified" : "Startup Confirmed";
+    const { rows } = await pool.query(
+      `UPDATE introductions SET approval_status = $2, updated_at = now(), updated_by = $3 WHERE id = $1 RETURNING *`,
+      [req.params.id, nextStatus, req.user.name]
+    );
+    if (intro.partner_id) {
+      await notifyPartner(intro.partner_id, "Status updated", intro.id);
+    } else {
+      await notifyStartup(intro.startup_id, "Status updated", intro.id);
+    }
+    res.json({ introduction: rows[0] });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/admin/introductions/:id/reject — RIV declines a request.
+router.put("/introductions/:id/reject", async (req, res, next) => {
+  try {
+    const { rows: introRows } = await pool.query("SELECT * FROM introductions WHERE id = $1", [req.params.id]);
+    const intro = introRows[0];
+    if (!intro) return res.status(404).json({ error: "Introduction not found." });
+    if (intro.approval_status !== "Pending RIV Approval") {
+      return res.status(400).json({ error: `Cannot reject from approval status "${intro.approval_status}".` });
+    }
+    const { rows } = await pool.query(
+      `UPDATE introductions SET approval_status = 'Rejected', updated_at = now(), updated_by = $2 WHERE id = $1 RETURNING *`,
+      [req.params.id, req.user.name]
+    );
+    await notifyStartup(intro.startup_id, "Status updated", intro.id);
+    res.json({ introduction: rows[0] });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // PUT /api/admin/introductions/:id — admin override: any field, including
-// status (full visibility + override per PRD §9).
+// status/approval_status (full visibility + override per PRD §9). Covers
+// the RIV Direct case where there's no GTM partner login to log the
+// introduction itself — admin can set approvalStatus/proof directly here.
 router.put("/introductions/:id", async (req, res, next) => {
   try {
     const f = req.body || {};
     if (f.status && !INTRODUCTION_STATUSES.includes(f.status)) {
       return res.status(400).json({ error: `status must be one of: ${INTRODUCTION_STATUSES.join(", ")}` });
     }
+    if (f.approvalStatus && !APPROVAL_STATUSES.includes(f.approvalStatus)) {
+      return res.status(400).json({ error: `approvalStatus must be one of: ${APPROVAL_STATUSES.join(", ")}` });
+    }
+    if (f.dealStatus && !DEAL_STATUSES.includes(f.dealStatus)) {
+      return res.status(400).json({ error: `dealStatus must be one of: ${DEAL_STATUSES.join(", ")}` });
+    }
     const { rows } = await pool.query(
       `UPDATE introductions SET
          status = COALESCE($2, status), intro_rate = COALESCE($3, intro_rate), closure_rate = COALESCE($4, closure_rate),
-         engagement_stage = COALESCE($5, engagement_stage), deal_value = COALESCE($6, deal_value), fee_amount_due = COALESCE($7, fee_amount_due),
+         engagement_stage = COALESCE($5, COALESCE($9, engagement_stage)), deal_value = COALESCE($6, deal_value),
+         fee_amount_due = COALESCE($7, fee_amount_due), approval_status = COALESCE($10, approval_status),
+         opportunity_value = COALESCE($11, opportunity_value), proof_of_introduction = COALESCE($12, proof_of_introduction),
          updated_at = now(), updated_by = $8
        WHERE id = $1 RETURNING *`,
-      [req.params.id, f.status, f.introRate, f.closureRate, f.engagementStage, f.dealValue, f.feeAmountDue, req.user.name]
+      [req.params.id, f.status, f.introRate, f.closureRate, f.engagementStage, f.dealValue, f.feeAmountDue, req.user.name,
+       f.dealStatus, f.approvalStatus, f.opportunityValue ?? null, f.proofOfIntroduction || null]
     );
     if (!rows[0]) return res.status(404).json({ error: "Introduction not found." });
     res.json({ introduction: rows[0] });

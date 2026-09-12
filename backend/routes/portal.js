@@ -1,7 +1,16 @@
 // RISE Portal — GTM Partner + Startup facing endpoints (PRD §6.3, §6.4,
 // §6.5, §9 access rules). Admin-only management lives in admin.js.
+//
+// 12 Sep 2026 addendum: GTM partners no longer initiate introductions
+// directly (the old "Introduce" action from the Startups tab is gone —
+// see the removed partner branch of POST /introductions below). Their
+// only write action now is submitting a retailer via "Add Retailer" /
+// My Retailers, which goes to RIV for approval like everything else.
+// Startups are the only role that can request an introduction, and every
+// request now runs through the approval_status chain (see db.js) rather
+// than going live immediately.
 const { Router } = require("express");
-const { pool } = require("../db.js");
+const { pool, APPROVAL_STATUSES, DEAL_STATUSES } = require("../db.js");
 const { requireAuth, requireRole } = require("../middleware/auth.js");
 
 const router = Router();
@@ -11,7 +20,8 @@ router.use(requireAuth);
 // phone are deliberately excluded here (PRD §7/§9: "Retailer contact
 // details are never shown to startups... only RIV or the introducing GTM
 // partner"). The admin route file selects contact_* explicitly.
-const RETAILER_PUBLIC_COLUMNS = "id, name, category, location, network_source, owning_partner_id, status";
+const RETAILER_PUBLIC_COLUMNS =
+  "id, name, brand, website, category, location, hq_country, network_source, owning_partner_id, submitted_by_partner_id, status";
 
 function isPartner(req) {
   return req.user.role === "partner";
@@ -38,7 +48,9 @@ router.get("/me", requireRole("partner", "startup", "admin"), async (req, res, n
 });
 
 // GET /api/startups — GTM partners browse the onboarded startup roster
-// (PRD §6.3 step 2). Solution summary shown; nothing sensitive here.
+// (PRD §6.3 step 2). View-only per the addendum — no introduce action
+// hangs off this list anymore, just enough to decide whether to open the
+// detail view.
 router.get("/startups", requireRole("partner", "admin"), async (req, res, next) => {
   try {
     const { rows } = await pool.query(
@@ -51,9 +63,31 @@ router.get("/startups", requireRole("partner", "admin"), async (req, res, next) 
   }
 });
 
-// GET /api/retailers — directory. A partner sees RIV Direct + their own
-// network; a startup sees everything (both networks combined, per PRD
-// §6.4 step 2); contact fields never included (see RETAILER_PUBLIC_COLUMNS).
+// GET /api/startups/:id — full profile for the Startup Detail View
+// (addendum §4). Same "nothing sensitive" bar as the list above, just
+// every field a GTM partner needs to assess the startup before backing an
+// introduction with their reputation.
+router.get("/startups/:id", requireRole("partner", "startup", "admin"), async (req, res, next) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT id, startup_name, founder_name, sector, solution_summary, problem_description,
+              solution_description, top_benefits, tech_stack, sub_vertical, competition,
+              competitive_advantage, paying_customer_count, notable_customers, key_milestones
+       FROM startups WHERE id = $1 AND status = 'Active'`,
+      [req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Startup not found." });
+    res.json({ startup: rows[0] });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// GET /api/retailers — "My Retailers" for a partner: retailers they
+// submitted (any approval state) plus anything RIV has approved into the
+// network, from any source (addendum §1). A startup still sees the full
+// approved directory. Contact fields never included (see
+// RETAILER_PUBLIC_COLUMNS).
 router.get("/retailers", requireRole("partner", "startup", "admin"), async (req, res, next) => {
   try {
     if (isPartner(req)) {
@@ -61,7 +95,7 @@ router.get("/retailers", requireRole("partner", "startup", "admin"), async (req,
       const partnerId = partnerRows[0]?.id ?? null;
       const { rows } = await pool.query(
         `SELECT ${RETAILER_PUBLIC_COLUMNS} FROM retailers
-         WHERE network_source = 'RIV Direct' OR owning_partner_id = $1
+         WHERE submitted_by_partner_id = $1 OR owning_partner_id = $1 OR status = 'Active in network'
          ORDER BY name`,
         [partnerId]
       );
@@ -71,6 +105,39 @@ router.get("/retailers", requireRole("partner", "startup", "admin"), async (req,
       `SELECT ${RETAILER_PUBLIC_COLUMNS} FROM retailers WHERE status = 'Active in network' ORDER BY name`
     );
     res.json({ retailers: rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// POST /api/retailers — "Add Retailer" (addendum §1). A GTM partner
+// submits a retailer into their own network; it lands as a Prospect
+// pending RIV approval, same as everywhere else in this workflow — it
+// only becomes visible to startups (or counted as "approved by RIV" in
+// another partner's My Retailers view) once RIV flips it to Active in
+// network from the admin panel. Fields mirror the RISE Introduction
+// Submission Form (Bigin) in full.
+router.post("/retailers", requireRole("partner"), async (req, res, next) => {
+  try {
+    const {
+      name, brand, website, location, hqCountry, category,
+      contactName, contactDesignation, contactEmail, contactPhone,
+    } = req.body || {};
+    if (!name) return res.status(400).json({ error: "Enter the retail enterprise you are referring." });
+
+    const { rows: p } = await pool.query("SELECT id FROM partners WHERE user_id = $1", [req.user.id]);
+    const partnerId = p[0]?.id;
+    if (!partnerId) return res.status(403).json({ error: "No partner profile linked to this login." });
+
+    const { rows } = await pool.query(
+      `INSERT INTO retailers
+         (name, brand, website, location, hq_country, category, network_source, owning_partner_id,
+          submitted_by_partner_id, contact_name, contact_designation, contact_email, contact_phone, status)
+       VALUES ($1,$2,$3,$4,$5,$6,'GTM Partner',$7,$7,$8,$9,$10,$11,'Prospect') RETURNING ${RETAILER_PUBLIC_COLUMNS}`,
+      [name, brand || null, website || null, location || null, hqCountry || null, category || null,
+       partnerId, contactName || null, contactDesignation || null, contactEmail || null, contactPhone || null]
+    );
+    res.status(201).json({ retailer: rows[0] });
   } catch (err) {
     next(err);
   }
@@ -119,64 +186,108 @@ router.get("/introductions/:id", requireRole("partner", "startup"), async (req, 
   }
 });
 
-// POST /api/introductions — create. Two shapes per PRD §6.3/§6.4:
-//  - GTM partner: { startupId, retailerId }               -> status "Pending Startup Agreement"
-//  - Startup:     { retailerId, agreeToCharges: true }     -> status "Approved" (request + agreement
-//                  combined into one action at submission, per PRD §6.4's explicit note)
-router.post("/introductions", requireRole("partner", "startup"), async (req, res, next) => {
+// POST /api/introductions — "Request Intro" (addendum §2/§3). Startup-only
+// now: GTM partners no longer propose introductions directly (their old
+// branch here is gone — see the file header note). Every request starts
+// at "Pending RIV Approval" regardless of whether the retailer sits in a
+// partner's network or is RIV Direct; RIV reviews everything before
+// anyone downstream hears about it. Fields mirror the Google Sheet/
+// tracker's Request Intro questionnaire exactly.
+router.post("/introductions", requireRole("startup"), async (req, res, next) => {
   try {
-    if (isPartner(req)) {
-      const { startupId, retailerId } = req.body || {};
-      if (!startupId || !retailerId) return res.status(400).json({ error: "startupId and retailerId are required." });
-
-      const { rows: p } = await pool.query("SELECT id FROM partners WHERE user_id = $1", [req.user.id]);
-      const partnerId = p[0]?.id;
-      if (!partnerId) return res.status(403).json({ error: "No partner profile linked to this login." });
-
-      const { rows: retailerRows } = await pool.query("SELECT network_source, owning_partner_id FROM retailers WHERE id = $1", [retailerId]);
-      const retailer = retailerRows[0];
-      if (!retailer) return res.status(404).json({ error: "Retailer not found." });
-      if (retailer.network_source === "GTM Partner" && retailer.owning_partner_id !== partnerId) {
-        return res.status(403).json({ error: "That retailer belongs to a different partner's network." });
-      }
-
-      const { rows } = await pool.query(
-        `INSERT INTO introductions (initiated_by, partner_id, startup_id, retailer_id, network_source, status)
-         VALUES ('GTM Partner', $1, $2, $3, $4, 'Pending Startup Agreement') RETURNING *`,
-        [partnerId, startupId, retailerId, retailer.network_source]
-      );
-      await notify(pool, "New introduction proposed", rows[0].id, "startup", startupId);
-      return res.status(201).json({ introduction: rows[0] });
-    }
-
-    // Startup-initiated
-    const { retailerId, agreeToCharges } = req.body || {};
-    if (!retailerId) return res.status(400).json({ error: "retailerId is required." });
-    if (!agreeToCharges) return res.status(400).json({ error: "You must agree to RIV's introduction/closure charges to submit a request." });
+    const {
+      retailerId, whyInterested, problemSolved, relevantOffering, buyerPersona,
+      previouslyEngaged, priorEngagementDetails, supportingMaterialUrl, consentAccepted,
+    } = req.body || {};
+    if (!retailerId) return res.status(400).json({ error: "Select the target enterprise (retailer)." });
+    if (!consentAccepted) return res.status(400).json({ error: "You must accept the Terms & Conditions to submit a request." });
 
     const { rows: s } = await pool.query("SELECT id FROM startups WHERE user_id = $1", [req.user.id]);
     const startupId = s[0]?.id;
     if (!startupId) return res.status(403).json({ error: "No startup profile linked to this login." });
 
-    const { rows: retailerRows } = await pool.query("SELECT network_source, owning_partner_id FROM retailers WHERE id = $1", [retailerId]);
+    const { rows: retailerRows } = await pool.query(
+      "SELECT network_source, owning_partner_id FROM retailers WHERE id = $1 AND status = 'Active in network'",
+      [retailerId]
+    );
     const retailer = retailerRows[0];
-    if (!retailer) return res.status(404).json({ error: "Retailer not found." });
+    if (!retailer) return res.status(404).json({ error: "Retailer not found or not yet approved." });
 
-    // Routing (PRD §6.4 step 4): RIV Direct -> RIV admin handles it
-    // directly (partner_id stays null); GTM Partner network -> that partner.
+    // Routing stays the same as before for who eventually gets notified
+    // once RIV approves (RIV Direct -> no partner in the loop; GTM Partner
+    // network -> that partner) — it just no longer determines the initial
+    // status, which is always Pending RIV Approval now.
     const partnerId = retailer.network_source === "GTM Partner" ? retailer.owning_partner_id : null;
 
     const { rows } = await pool.query(
       `INSERT INTO introductions
-         (initiated_by, partner_id, startup_id, retailer_id, network_source, startup_agreed, startup_agreed_at, status)
-       VALUES ('Startup', $1, $2, $3, $4, true, now(), 'Approved') RETURNING *`,
-      [partnerId, startupId, retailerId, retailer.network_source]
+         (initiated_by, partner_id, startup_id, retailer_id, network_source, approval_status, status,
+          why_interested, problem_solved, relevant_offering, buyer_persona, previously_engaged,
+          prior_engagement_details, supporting_material_url, consent_accepted, consent_accepted_at)
+       VALUES ('Startup', $1, $2, $3, $4, 'Pending RIV Approval', 'Requested',
+               $5, $6, $7, $8, $9, $10, $11, true, now())
+       RETURNING *`,
+      [partnerId, startupId, retailerId, retailer.network_source,
+       whyInterested || null, problemSolved || null, relevantOffering || null, buyerPersona || null,
+       previouslyEngaged ?? null, priorEngagementDetails || null, supportingMaterialUrl || null]
     );
-    if (partnerId) {
-      const { rows: partnerUserRows } = await pool.query("SELECT user_id FROM partners WHERE id = $1", [partnerId]);
-      if (partnerUserRows[0]?.user_id) await notifyUserId(pool, "New introduction proposed", rows[0].id, partnerUserRows[0].user_id);
-    }
     res.status(201).json({ introduction: rows[0] });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/introductions/:id/opportunity — startup edits Opportunity Value
+// and/or Deal Status at any point once the request exists (addendum §2's
+// "My Introduction Requests" columns — both are startup-editable, unlike
+// the RIV-driven approval_status).
+router.put("/introductions/:id/opportunity", requireRole("startup"), async (req, res, next) => {
+  try {
+    const { opportunityValue, dealStatus } = req.body || {};
+    if (dealStatus && !DEAL_STATUSES.includes(dealStatus)) {
+      return res.status(400).json({ error: `dealStatus must be one of: ${DEAL_STATUSES.join(", ")}` });
+    }
+    const { rows: s } = await pool.query("SELECT id FROM startups WHERE user_id = $1", [req.user.id]);
+    const { rows: introRows } = await pool.query("SELECT * FROM introductions WHERE id = $1", [req.params.id]);
+    const intro = introRows[0];
+    if (!intro || intro.startup_id !== s[0]?.id) return res.status(404).json({ error: "Introduction not found." });
+
+    const { rows } = await pool.query(
+      `UPDATE introductions SET opportunity_value = COALESCE($2, opportunity_value),
+         engagement_stage = COALESCE($3, engagement_stage), updated_at = now(), updated_by = $4
+       WHERE id = $1 RETURNING *`,
+      [req.params.id, opportunityValue ?? null, dealStatus || null, req.user.name]
+    );
+    res.json({ introduction: rows[0] });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/introductions/:id/confirm-request — startup's confirmation step
+// after RIV has approved and the GTM partner has been notified (addendum
+// §3's chain: ...RIV approves -> GTM partner notified -> Startup confirms
+// -> Introduction is made). Not to be confused with the legacy /agree
+// endpoint below, which belongs to the old charge-agreement lifecycle.
+router.put("/introductions/:id/confirm-request", requireRole("startup"), async (req, res, next) => {
+  try {
+    const { rows: s } = await pool.query("SELECT id FROM startups WHERE user_id = $1", [req.user.id]);
+    const { rows: introRows } = await pool.query("SELECT * FROM introductions WHERE id = $1", [req.params.id]);
+    const intro = introRows[0];
+    if (!intro || intro.startup_id !== s[0]?.id) return res.status(404).json({ error: "Introduction not found." });
+    if (intro.approval_status !== "GTM Notified") {
+      return res.status(400).json({ error: `Cannot confirm from approval status "${intro.approval_status}".` });
+    }
+    const { rows } = await pool.query(
+      `UPDATE introductions SET approval_status = 'Startup Confirmed', updated_at = now(), updated_by = $2
+       WHERE id = $1 RETURNING *`,
+      [req.params.id, req.user.name]
+    );
+    if (intro.partner_id) {
+      const { rows: partnerUserRows } = await pool.query("SELECT user_id FROM partners WHERE id = $1", [intro.partner_id]);
+      if (partnerUserRows[0]?.user_id) await notifyUserId(pool, "Status updated", req.params.id, partnerUserRows[0].user_id);
+    }
+    res.json({ introduction: rows[0] });
   } catch (err) {
     next(err);
   }
@@ -222,11 +333,14 @@ router.put("/introductions/:id/log-introduction", requireRole("partner"), async 
     const { rows: introRows } = await pool.query("SELECT * FROM introductions WHERE id = $1", [req.params.id]);
     const intro = introRows[0];
     if (!intro || intro.partner_id !== p[0]?.id) return res.status(404).json({ error: "Introduction not found." });
-    if (intro.status !== "Approved") return res.status(400).json({ error: `Cannot log an introduction from status "${intro.status}" — startup must agree first.` });
+    if (intro.approval_status !== "Startup Confirmed") {
+      return res.status(400).json({ error: `Cannot log an introduction from approval status "${intro.approval_status}" — the startup must confirm first.` });
+    }
 
     const { rows } = await pool.query(
       `UPDATE introductions
-       SET channel = $2, introduction_date = COALESCE($3, CURRENT_DATE), proof_of_introduction = $4, status = 'Introduced', updated_at = now(), updated_by = $5
+       SET channel = $2, introduction_date = COALESCE($3, CURRENT_DATE), proof_of_introduction = $4,
+           status = 'Introduced', approval_status = 'Proof Recorded', updated_at = now(), updated_by = $5
        WHERE id = $1 RETURNING *`,
       [req.params.id, channel || "Email", introductionDate || null, proofOfIntroduction, req.user.name]
     );

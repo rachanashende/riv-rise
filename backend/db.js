@@ -50,6 +50,28 @@ const INTRODUCTION_STATUSES = [
   "Payout Complete",
 ];
 
+// GTM Portal / Startup Portal restructure (RISE Module addendum, 12 Sep
+// 2026): the approval chain that gates whether an introduction is even
+// live yet — kept as its OWN field (approval_status) rather than folded
+// into the legacy INTRODUCTION_STATUSES lifecycle above, because the two
+// answer different questions ("is this approved to happen" vs "how is the
+// resulting deal going") and the addendum explicitly wants them shown as
+// two separate columns (Introduction Request Status vs Deal Status).
+const APPROVAL_STATUSES = [
+  "Pending RIV Approval",
+  "RIV Approved",
+  "Rejected",
+  "GTM Notified",
+  "Startup Confirmed",
+  "Introduced",
+  "Proof Recorded",
+];
+
+// Deal Status dropdown (addendum §2) — repurposes the existing
+// engagement_stage column, replacing its old five-value set (In
+// discussion/Piloting/Stalled/Won/Lost) with this one.
+const DEAL_STATUSES = ["Demo", "Pilot", "Proposal", "Negotiation", "Follow-up", "Closed Won", "Closed Lost"];
+
 async function initSchema() {
   await pool.query(`
     CREATE TABLE IF NOT EXISTS users (
@@ -234,6 +256,72 @@ async function initSchema() {
   // this field existed (the CREATE TABLE IF NOT EXISTS above only applies
   // to brand-new databases).
   await pool.query(`ALTER TABLE introductions ADD COLUMN IF NOT EXISTS updated_by TEXT;`);
+
+  // --- GTM Portal / Startup Portal restructure (12 Sep 2026 addendum) ---
+  // All ADD COLUMN IF NOT EXISTS below are safe to run every boot the same
+  // way updated_by is above; they only take effect on the first boot after
+  // this code ships and are no-ops afterward.
+  await pool.query(`
+    ALTER TABLE retailers ADD COLUMN IF NOT EXISTS website TEXT;
+    ALTER TABLE retailers ADD COLUMN IF NOT EXISTS brand TEXT;
+    ALTER TABLE retailers ADD COLUMN IF NOT EXISTS hq_country TEXT;
+    ALTER TABLE retailers ADD COLUMN IF NOT EXISTS contact_designation TEXT;
+    ALTER TABLE retailers ADD COLUMN IF NOT EXISTS submitted_by_partner_id INTEGER REFERENCES partners(id) ON DELETE SET NULL;
+
+    -- Startup profile fields for the new Startup Detail View (addendum §4).
+    -- Company deck upload is explicitly Phase 2 (per the source notes) and
+    -- deliberately not modeled here yet.
+    ALTER TABLE startups ADD COLUMN IF NOT EXISTS problem_description TEXT;
+    ALTER TABLE startups ADD COLUMN IF NOT EXISTS solution_description TEXT;
+    ALTER TABLE startups ADD COLUMN IF NOT EXISTS top_benefits TEXT;
+    ALTER TABLE startups ADD COLUMN IF NOT EXISTS tech_stack TEXT;
+    ALTER TABLE startups ADD COLUMN IF NOT EXISTS sub_vertical TEXT;
+    ALTER TABLE startups ADD COLUMN IF NOT EXISTS competition TEXT;
+    ALTER TABLE startups ADD COLUMN IF NOT EXISTS competitive_advantage TEXT;
+    ALTER TABLE startups ADD COLUMN IF NOT EXISTS paying_customer_count TEXT;
+    ALTER TABLE startups ADD COLUMN IF NOT EXISTS notable_customers TEXT;
+    ALTER TABLE startups ADD COLUMN IF NOT EXISTS key_milestones TEXT;
+
+    -- New Introduction Request Status chain (separate from the legacy
+    -- "status" lifecycle above — see APPROVAL_STATUSES comment).
+    ALTER TABLE introductions ADD COLUMN IF NOT EXISTS approval_status TEXT NOT NULL DEFAULT 'Pending RIV Approval';
+    -- Opportunity Value (addendum §2) — distinct from deal_value, which is
+    -- the final confirmed-sale figure logged with a PO at Closed-Won.
+    -- Opportunity Value is an in-flight, startup-editable estimate.
+    ALTER TABLE introductions ADD COLUMN IF NOT EXISTS opportunity_value NUMERIC;
+    ALTER TABLE introductions ADD COLUMN IF NOT EXISTS consent_accepted BOOLEAN NOT NULL DEFAULT false;
+    ALTER TABLE introductions ADD COLUMN IF NOT EXISTS consent_accepted_at TIMESTAMPTZ;
+    -- Request Intro popup fields (addendum §2), matching the existing
+    -- Google Sheet/tracker columns exactly.
+    ALTER TABLE introductions ADD COLUMN IF NOT EXISTS why_interested TEXT;
+    ALTER TABLE introductions ADD COLUMN IF NOT EXISTS problem_solved TEXT;
+    ALTER TABLE introductions ADD COLUMN IF NOT EXISTS relevant_offering TEXT;
+    ALTER TABLE introductions ADD COLUMN IF NOT EXISTS buyer_persona TEXT;
+    ALTER TABLE introductions ADD COLUMN IF NOT EXISTS previously_engaged BOOLEAN;
+    ALTER TABLE introductions ADD COLUMN IF NOT EXISTS prior_engagement_details TEXT;
+    ALTER TABLE introductions ADD COLUMN IF NOT EXISTS supporting_material_url TEXT;
+    -- GTM Partner's "Add Retailer" submission fields (Bigin form parity) —
+    -- context for why this retailer/startup pairing is relevant and how
+    -- the partner has already engaged the enterprise contact.
+    ALTER TABLE introductions ADD COLUMN IF NOT EXISTS gtm_context_note TEXT;
+    ALTER TABLE introductions ADD COLUMN IF NOT EXISTS how_introduced TEXT;
+  `);
+
+  // approval_status / engagement_stage (repurposed as Deal Status) both
+  // need their CHECK constraints (re)applied on every boot — dropped and
+  // recreated unconditionally rather than ADD COLUMN's inline CHECK, since
+  // engagement_stage already existed pre-addendum with a different value
+  // set and Postgres has no "ADD COLUMN CHECK IF NOT EXISTS" equivalent
+  // for altering an existing constraint.
+  await pool.query(`
+    ALTER TABLE introductions DROP CONSTRAINT IF EXISTS introductions_approval_status_check;
+    ALTER TABLE introductions ADD CONSTRAINT introductions_approval_status_check
+      CHECK (approval_status IN (${APPROVAL_STATUSES.map((s) => `'${s}'`).join(",")}));
+
+    ALTER TABLE introductions DROP CONSTRAINT IF EXISTS introductions_engagement_stage_check;
+    ALTER TABLE introductions ADD CONSTRAINT introductions_engagement_stage_check
+      CHECK (engagement_stage IN (${DEAL_STATUSES.map((s) => `'${s}'`).join(",")}));
+  `);
 }
 
-module.exports = { pool, INTRODUCTION_STATUSES, initSchema };
+module.exports = { pool, INTRODUCTION_STATUSES, APPROVAL_STATUSES, DEAL_STATUSES, initSchema };
