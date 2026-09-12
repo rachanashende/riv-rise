@@ -207,7 +207,7 @@ function LoginView({ onAuthed }) {
 /* =========================================================================
    NAV
    ========================================================================= */
-function NavBar({ view, setView, user, onLogout, onAddRetailer }) {
+function NavBar({ view, setView, user, onLogout }) {
   const items =
     user.role === "partner" ? [
       { id: "startups", label: "Startups" }, { id: "retailers", label: "My Retailers" },
@@ -221,38 +221,30 @@ function NavBar({ view, setView, user, onLogout, onAddRetailer }) {
     ];
   return (
     <div style={{ borderBottom: `1px solid ${BRAND.line}`, background: "#fff", position: "sticky", top: 0, zIndex: 20 }}>
-      <div style={{ maxWidth: 1160, margin: "0 auto", padding: "0 24px" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 62 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
-            <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 16, color: BRAND.ink }}>RISE Portal</div>
-            <div style={{ display: "flex", gap: 4 }}>
-              {items.map((it) => (
-                <button key={it.id} onClick={() => setView(it.id)} style={{
-                  fontFamily: FONT, fontWeight: 600, fontSize: 13, padding: "8px 12px", borderRadius: 8,
-                  border: "none", cursor: "pointer",
-                  background: view === it.id ? BRAND.cream : "transparent",
-                  color: view === it.id ? BRAND.coral : "#7A756F",
-                }}>
-                  {it.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <div style={{ fontFamily: FONT, fontSize: 12.5, color: "#7A756F" }}>{user.name}</div>
-            <GhostButton onClick={onLogout} icon={LogOut} style={{ padding: "8px 12px" }}>Log out</GhostButton>
+      <div style={{ maxWidth: 1160, margin: "0 auto", padding: "0 24px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 62 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
+          <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 16, color: BRAND.ink }}>RISE Portal</div>
+          <div style={{ display: "flex", gap: 4 }}>
+            {items.map((it) => (
+              <button key={it.id} onClick={() => setView(it.id)} style={{
+                fontFamily: FONT, fontWeight: 600, fontSize: 13, padding: "8px 12px", borderRadius: 8,
+                border: "none", cursor: "pointer",
+                background: view === it.id ? BRAND.cream : "transparent",
+                color: view === it.id ? BRAND.coral : "#7A756F",
+              }}>
+                {it.label}
+              </button>
+            ))}
           </div>
         </div>
-        {user.role === "partner" && view === "retailers" && (
-          <div style={{ display: "flex", justifyContent: "flex-end", paddingBottom: 12 }}>
-            <PrimaryButton icon={Plus} onClick={onAddRetailer} style={{ padding: "8px 14px" }}>Add Retailer</PrimaryButton>
-          </div>
-        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+          <div style={{ fontFamily: FONT, fontSize: 12.5, color: "#7A756F" }}>{user.name}</div>
+          <GhostButton onClick={onLogout} icon={LogOut} style={{ padding: "8px 12px" }}>Log out</GhostButton>
+        </div>
       </div>
     </div>
   );
 }
-
 /* =========================================================================
    SHARED: introduction cards + detail drawer
    ========================================================================= */
@@ -1205,10 +1197,15 @@ export default function RiseGtmApp() {
   return (
     <div style={{ minHeight: "100vh", background: BRAND.cream }}>
       <GlobalStyle />
-      <NavBar view={view} setView={setView} user={user} onLogout={logout} onAddRetailer={() => setShowAddRetailer(true)} />
+      <NavBar view={view} setView={setView} user={user} onLogout={logout} />
       <div style={{ maxWidth: 1160, margin: "0 auto", padding: "28px 24px 60px" }}>
-        <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 20, color: BRAND.ink, marginBottom: 18, textTransform: "capitalize" }}>
-          {view?.replace(/-/g, " ")}
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+          <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 20, color: BRAND.ink, textTransform: "capitalize" }}>
+            {view?.replace(/-/g, " ")}
+          </div>
+          {user.role === "partner" && view === "retailers" && (
+            <PrimaryButton icon={Plus} onClick={() => setShowAddRetailer(true)} style={{ padding: "8px 14px" }}>Add Retailer</PrimaryButton>
+          )}
         </div>
 
         {user.role === "partner" && view === "startups" && <PartnerStartupsView onViewDetails={setDetailStartupId} />}
