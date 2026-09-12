@@ -179,6 +179,7 @@ function LoginView({ onAuthed }) {
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: BRAND.cream, padding: 20 }}>
       <div style={{ width: "100%", maxWidth: 400 }}>
         <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <img src="/riv-logo-full.png" alt="Retail Innovation Ventures" style={{ height: 48, marginBottom: 10 }} />
           <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 22, color: BRAND.ink }}>RISE Portal</div>
           <div style={{ fontFamily: FONT, fontSize: 13, color: "#9B958F", marginTop: 6 }}>GTM partner & startup introductions</div>
         </div>
@@ -223,7 +224,10 @@ function NavBar({ view, setView, user, onLogout }) {
     <div style={{ borderBottom: `1px solid ${BRAND.line}`, background: "#fff", position: "sticky", top: 0, zIndex: 20 }}>
       <div style={{ maxWidth: 1160, margin: "0 auto", padding: "0 24px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 62 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
-          <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 16, color: BRAND.ink }}>RISE Portal</div>
+          <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 16, color: BRAND.ink, display: "flex", alignItems: "center", gap: 10 }}>
+            <img src="/riv-logo-full.png" alt="Retail Innovation Ventures" style={{ height: 26 }} />
+            RISE Portal
+          </div>
           <div style={{ display: "flex", gap: 4 }}>
             {items.map((it) => (
               <button key={it.id} onClick={() => setView(it.id)} style={{
