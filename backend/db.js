@@ -313,14 +313,24 @@ async function initSchema() {
   // engagement_stage already existed pre-addendum with a different value
   // set and Postgres has no "ADD COLUMN CHECK IF NOT EXISTS" equivalent
   // for altering an existing constraint.
+  //
+  // NOT VALID is required here: without it, ADD CONSTRAINT validates every
+  // EXISTING row against the new check, and any pre-addendum row still
+  // holding an old engagement_stage value (e.g. seeded demo data with "In
+  // discussion"/"Piloting"/"Won"/"Lost" — the old five-value set, not the
+  // new Deal Status list) fails validation and crashes the boot outright
+  // (this is exactly what happened in production — ATRewriteTable erroring
+  // on introductions_engagement_stage_check). NOT VALID skips validating
+  // old rows retroactively while still enforcing the constraint on every
+  // new insert/update going forward, which is all we actually need.
   await pool.query(`
     ALTER TABLE introductions DROP CONSTRAINT IF EXISTS introductions_approval_status_check;
     ALTER TABLE introductions ADD CONSTRAINT introductions_approval_status_check
-      CHECK (approval_status IN (${APPROVAL_STATUSES.map((s) => `'${s}'`).join(",")}));
+      CHECK (approval_status IN (${APPROVAL_STATUSES.map((s) => `'${s}'`).join(",")})) NOT VALID;
 
     ALTER TABLE introductions DROP CONSTRAINT IF EXISTS introductions_engagement_stage_check;
     ALTER TABLE introductions ADD CONSTRAINT introductions_engagement_stage_check
-      CHECK (engagement_stage IN (${DEAL_STATUSES.map((s) => `'${s}'`).join(",")}));
+      CHECK (engagement_stage IN (${DEAL_STATUSES.map((s) => `'${s}'`).join(",")})) NOT VALID;
   `);
 }
 
