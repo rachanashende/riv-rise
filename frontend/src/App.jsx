@@ -221,29 +221,33 @@ function NavBar({ view, setView, user, onLogout, onAddRetailer }) {
     ];
   return (
     <div style={{ borderBottom: `1px solid ${BRAND.line}`, background: "#fff", position: "sticky", top: 0, zIndex: 20 }}>
-      <div style={{ maxWidth: 1160, margin: "0 auto", padding: "0 24px", display: "flex", alignItems: "center", justifyContent: "space-between", height: 62 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
-          <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 16, color: BRAND.ink }}>RISE Portal</div>
-          <div style={{ display: "flex", gap: 4 }}>
-            {items.map((it) => (
-              <button key={it.id} onClick={() => setView(it.id)} style={{
-                fontFamily: FONT, fontWeight: 600, fontSize: 13, padding: "8px 12px", borderRadius: 8,
-                border: "none", cursor: "pointer",
-                background: view === it.id ? BRAND.cream : "transparent",
-                color: view === it.id ? BRAND.coral : "#7A756F",
-              }}>
-                {it.label}
-              </button>
-            ))}
+      <div style={{ maxWidth: 1160, margin: "0 auto", padding: "0 24px" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", height: 62 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 28 }}>
+            <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 16, color: BRAND.ink }}>RISE Portal</div>
+            <div style={{ display: "flex", gap: 4 }}>
+              {items.map((it) => (
+                <button key={it.id} onClick={() => setView(it.id)} style={{
+                  fontFamily: FONT, fontWeight: 600, fontSize: 13, padding: "8px 12px", borderRadius: 8,
+                  border: "none", cursor: "pointer",
+                  background: view === it.id ? BRAND.cream : "transparent",
+                  color: view === it.id ? BRAND.coral : "#7A756F",
+                }}>
+                  {it.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <div style={{ fontFamily: FONT, fontSize: 12.5, color: "#7A756F" }}>{user.name}</div>
+            <GhostButton onClick={onLogout} icon={LogOut} style={{ padding: "8px 12px" }}>Log out</GhostButton>
           </div>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-          {user.role === "partner" && view === "retailers" && (
+        {user.role === "partner" && view === "retailers" && (
+          <div style={{ display: "flex", justifyContent: "flex-end", paddingBottom: 12 }}>
             <PrimaryButton icon={Plus} onClick={onAddRetailer} style={{ padding: "8px 14px" }}>Add Retailer</PrimaryButton>
-          )}
-          <div style={{ fontFamily: FONT, fontSize: 12.5, color: "#7A756F" }}>{user.name}</div>
-          <GhostButton onClick={onLogout} icon={LogOut} style={{ padding: "8px 12px" }}>Log out</GhostButton>
-        </div>
+          </div>
+        )}
       </div>
     </div>
   );
