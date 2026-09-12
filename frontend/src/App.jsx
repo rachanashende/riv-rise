@@ -47,6 +47,16 @@ const APPROVAL_COLORS = {
 };
 const DEAL_STATUS_OPTIONS = ["Demo", "Pilot", "Proposal", "Negotiation", "Follow-up", "Closed Won", "Closed Lost"];
 
+// Retailer status colors: green once approved, yellow when flagged as a
+// possible duplicate of an existing retailer, red once rejected. Prospect
+// (submitted, not yet reviewed, no duplicate match) falls through to
+// StatusBadge's neutral grey default.
+const RETAILER_STATUS_COLORS = {
+  "Active in network": { bg: "#E6F4EA", fg: "#1E7A34" },
+  "Duplicate": { bg: "#FFF9DB", fg: "#8A6D00" },
+  "Rejected": { bg: "#FBEAEA", fg: BRAND.coralDark },
+};
+
 /* =========================================================================
    UI PRIMITIVES
    ========================================================================= */
@@ -570,16 +580,28 @@ function RetailerDirectoryView({ user, onRequest }) {
   return (
     <div>
       {retailers.map((r) => (
-        <Card key={r.id} style={{ padding: 16, marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14 }}>
-          <div>
-            <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 14, color: BRAND.ink }}>{r.brand || r.name}</div>
-            <div style={{ fontFamily: FONT, fontSize: 12, color: "#9B958F", marginTop: 3 }}>{r.category} · {r.location}{r.hq_country ? `, ${r.hq_country}` : ""}</div>
-            <div style={{ fontFamily: FONT, fontSize: 11, color: "#B7B2AE", marginTop: 5 }}>{r.network_source === "GTM Partner" ? "Partner network" : "RIV direct"}</div>
+        <Card key={r.id} style={{ padding: 16, marginBottom: 10 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 14 }}>
+            <div>
+              <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 14, color: BRAND.ink }}>{r.brand || r.name}</div>
+              <div style={{ fontFamily: FONT, fontSize: 12, color: "#9B958F", marginTop: 3 }}>{r.category} · {r.location}{r.hq_country ? `, ${r.hq_country}` : ""}</div>
+              <div style={{ fontFamily: FONT, fontSize: 11, color: "#B7B2AE", marginTop: 5 }}>{r.network_source === "GTM Partner" ? "Partner network" : "RIV direct"}</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+              {user.role === "partner" && <StatusBadge status={r.status} colors={RETAILER_STATUS_COLORS} />}
+              {user.role === "startup" && <PrimaryButton icon={Send} onClick={() => onRequest(r)}>Request intro</PrimaryButton>}
+            </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-            {user.role === "partner" && <StatusBadge status={r.status === "Active in network" ? "RIV Approved" : "Pending RIV Approval"} colors={APPROVAL_COLORS} />}
-            {user.role === "startup" && <PrimaryButton icon={Send} onClick={() => onRequest(r)}>Request intro</PrimaryButton>}
-          </div>
+          {user.role === "partner" && r.status === "Rejected" && r.rejection_reason && (
+            <div style={{ fontFamily: FONT, fontSize: 12, color: BRAND.coralDark, background: "#FBEAEA", borderRadius: 8, padding: "8px 12px", marginTop: 10 }}>
+              RIV's note: {r.rejection_reason}
+            </div>
+          )}
+          {user.role === "partner" && r.status === "Duplicate" && (
+            <div style={{ fontFamily: FONT, fontSize: 12, color: "#8A6D00", background: "#FFF9DB", borderRadius: 8, padding: "8px 12px", marginTop: 10 }}>
+              This looks similar to a retailer already on file — RIV will review before approving.
+            </div>
+          )}
         </Card>
       ))}
     </div>
@@ -903,6 +925,26 @@ function AdminStartupsView() {
   );
 }
 
+// Inline reject-with-reason control for AdminRetailersView — collapsed to
+// a single "Reject" link until clicked, then expands into a required
+// reason field so the comment isn't an afterthought.
+function RejectRetailerRow({ onReject }) {
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  if (!open) return (
+    <div style={{ marginTop: 10 }}>
+      <GhostButton onClick={() => setOpen(true)} style={{ color: BRAND.coralDark }}>Reject</GhostButton>
+    </div>
+  );
+  return (
+    <div style={{ display: "flex", gap: 8, marginTop: 10 }}>
+      <input style={{ ...inputStyle, flex: 1 }} placeholder="Reason for rejecting (shown to the partner)" value={reason} onChange={(e) => setReason(e.target.value)} autoFocus />
+      <PrimaryButton disabled={!reason.trim()} onClick={() => onReject(reason.trim())} style={{ background: BRAND.coralDark }}>Confirm reject</PrimaryButton>
+      <GhostButton onClick={() => setOpen(false)}>Cancel</GhostButton>
+    </div>
+  );
+}
+
 function AdminRetailersView() {
   const [retailers, setRetailers] = useState(null);
   const [partners, setPartners] = useState([]);
@@ -927,6 +969,11 @@ function AdminRetailersView() {
     try { await api.approveRetailer(id); load(); }
     catch (e) { setError(e.message); }
   }
+  async function reject(id, reason) {
+    setError("");
+    try { await api.rejectRetailer(id, reason); load(); }
+    catch (e) { setError(e.message); }
+  }
 
   if (error) return <ErrorBanner text={error} />;
   return (
@@ -943,12 +990,23 @@ function AdminRetailersView() {
               <div style={{ fontFamily: FONT, fontWeight: 700, fontSize: 14, color: BRAND.ink }}>{r.brand || r.name}</div>
               <div style={{ fontFamily: FONT, fontSize: 12, color: "#9B958F", marginTop: 3 }}>{r.category} · {r.location}{r.hq_country ? `, ${r.hq_country}` : ""} · {r.network_source}{r.owning_partner_name ? ` (${r.owning_partner_name})` : ""}</div>
               <div style={{ fontFamily: FONT, fontSize: 11, color: "#B7B2AE", marginTop: 5 }}>Contact: {r.contact_name || "—"}{r.contact_designation ? ` (${r.contact_designation})` : ""} · {r.contact_email || "—"} · {r.contact_phone || "—"}</div>
+              {r.rejection_reason && (
+                <div style={{ fontFamily: FONT, fontSize: 11.5, color: BRAND.coralDark, marginTop: 6 }}>Rejected: {r.rejection_reason}</div>
+              )}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-              <StatusBadge status={r.status} />
-              {r.status !== "Active in network" && <PrimaryButton onClick={() => approve(r.id)}>Approve</PrimaryButton>}
+              <StatusBadge status={r.status} colors={RETAILER_STATUS_COLORS} />
+              {r.status !== "Active in network" && r.status !== "Rejected" && <PrimaryButton onClick={() => approve(r.id)}>Approve</PrimaryButton>}
             </div>
           </div>
+          {r.status === "Duplicate" && (
+            <div style={{ fontFamily: FONT, fontSize: 12, color: "#8A6D00", background: "#FFF9DB", borderRadius: 8, padding: "8px 12px", marginTop: 10 }}>
+              Possible duplicate of <strong>{r.duplicate_of_name || `retailer #${r.duplicate_of_retailer_id}`}</strong> — compare before approving.
+            </div>
+          )}
+          {r.status !== "Active in network" && r.status !== "Rejected" && (
+            <RejectRetailerRow onReject={(reason) => reject(r.id, reason)} />
+          )}
         </Card>
       ))}
       {showNew && (

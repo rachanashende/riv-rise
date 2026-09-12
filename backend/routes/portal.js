@@ -21,7 +21,7 @@ router.use(requireAuth);
 // details are never shown to startups... only RIV or the introducing GTM
 // partner"). The admin route file selects contact_* explicitly.
 const RETAILER_PUBLIC_COLUMNS =
-  "id, name, brand, website, category, location, hq_country, network_source, owning_partner_id, submitted_by_partner_id, status";
+  "id, name, brand, website, category, location, hq_country, network_source, owning_partner_id, submitted_by_partner_id, status, rejection_reason";
 
 function isPartner(req) {
   return req.user.role === "partner";
@@ -129,13 +129,27 @@ router.post("/retailers", requireRole("partner"), async (req, res, next) => {
     const partnerId = p[0]?.id;
     if (!partnerId) return res.status(403).json({ error: "No partner profile linked to this login." });
 
+    // Duplicate detection — case/whitespace-insensitive match on name
+    // against every existing retailer (any status, any submitter), not
+    // just this partner's own. A match doesn't block the submission; it
+    // still goes to RIV for review, just flagged so admin knows to check
+    // it against the existing row before approving both.
+    const { rows: dup } = await pool.query(
+      "SELECT id FROM retailers WHERE lower(trim(name)) = lower(trim($1)) LIMIT 1",
+      [name]
+    );
+    const duplicateOfId = dup[0]?.id || null;
+    const status = duplicateOfId ? "Duplicate" : "Prospect";
+
     const { rows } = await pool.query(
       `INSERT INTO retailers
          (name, brand, website, location, hq_country, category, network_source, owning_partner_id,
-          submitted_by_partner_id, contact_name, contact_designation, contact_email, contact_phone, status)
-       VALUES ($1,$2,$3,$4,$5,$6,'GTM Partner',$7,$7,$8,$9,$10,$11,'Prospect') RETURNING ${RETAILER_PUBLIC_COLUMNS}`,
+          submitted_by_partner_id, contact_name, contact_designation, contact_email, contact_phone,
+          status, duplicate_of_retailer_id)
+       VALUES ($1,$2,$3,$4,$5,$6,'GTM Partner',$7,$7,$8,$9,$10,$11,$12,$13) RETURNING ${RETAILER_PUBLIC_COLUMNS}`,
       [name, brand || null, website || null, location || null, hqCountry || null, category || null,
-       partnerId, contactName || null, contactDesignation || null, contactEmail || null, contactPhone || null]
+       partnerId, contactName || null, contactDesignation || null, contactEmail || null, contactPhone || null,
+       status, duplicateOfId]
     );
     res.status(201).json({ retailer: rows[0] });
   } catch (err) {

@@ -233,7 +233,11 @@ router.delete("/startups/:id", async (req, res, next) => {
 router.get("/retailers", async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      `SELECT r.*, p.full_name AS owning_partner_name FROM retailers r LEFT JOIN partners p ON p.id = r.owning_partner_id ORDER BY r.created_at DESC`
+      `SELECT r.*, p.full_name AS owning_partner_name, dup.name AS duplicate_of_name
+       FROM retailers r
+       LEFT JOIN partners p ON p.id = r.owning_partner_id
+       LEFT JOIN retailers dup ON dup.id = r.duplicate_of_retailer_id
+       ORDER BY r.created_at DESC`
     );
     res.json({ retailers: rows });
   } catch (err) {
@@ -270,8 +274,26 @@ router.post("/retailers", async (req, res, next) => {
 router.put("/retailers/:id/approve", async (req, res, next) => {
   try {
     const { rows } = await pool.query(
-      `UPDATE retailers SET status = 'Active in network' WHERE id = $1 RETURNING *`,
+      `UPDATE retailers SET status = 'Active in network', rejection_reason = NULL WHERE id = $1 RETURNING *`,
       [req.params.id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: "Retailer not found." });
+    res.json({ retailer: rows[0] });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// PUT /api/admin/retailers/:id/reject — disapprove a submission with a
+// required reason, surfaced back to the submitting partner (RETAILER_
+// PUBLIC_COLUMNS in portal.js includes rejection_reason).
+router.put("/retailers/:id/reject", async (req, res, next) => {
+  try {
+    const { reason } = req.body || {};
+    if (!reason || !reason.trim()) return res.status(400).json({ error: "A reason is required to reject a retailer." });
+    const { rows } = await pool.query(
+      `UPDATE retailers SET status = 'Rejected', rejection_reason = $2 WHERE id = $1 RETURNING *`,
+      [req.params.id, reason.trim()]
     );
     if (!rows[0]) return res.status(404).json({ error: "Retailer not found." });
     res.json({ retailer: rows[0] });

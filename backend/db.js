@@ -164,7 +164,6 @@ async function initSchema() {
         CHECK (status IN ('Active in network','Prospect')),
       created_at TIMESTAMPTZ NOT NULL DEFAULT now()
     );
-
     -- Introduction (PRD §8.4) — the core transactional object; one row per
     -- request → agreement → introduction → proof → follow-up → sale →
     -- invoice → payout thread. invoice_id/payout_id are plain nullable
@@ -267,6 +266,12 @@ async function initSchema() {
     ALTER TABLE retailers ADD COLUMN IF NOT EXISTS hq_country TEXT;
     ALTER TABLE retailers ADD COLUMN IF NOT EXISTS contact_designation TEXT;
     ALTER TABLE retailers ADD COLUMN IF NOT EXISTS submitted_by_partner_id INTEGER REFERENCES partners(id) ON DELETE SET NULL;
+    -- Duplicate-detection + reject-with-comment (12 Sep 2026 addendum #2).
+    -- duplicate_of_retailer_id is informational only (surfaced to admin so
+    -- they know which existing row to compare against) — it does not
+    -- block the submission, RIV still makes the call either way.
+    ALTER TABLE retailers ADD COLUMN IF NOT EXISTS duplicate_of_retailer_id INTEGER REFERENCES retailers(id) ON DELETE SET NULL;
+    ALTER TABLE retailers ADD COLUMN IF NOT EXISTS rejection_reason TEXT;
 
     -- Startup profile fields for the new Startup Detail View (addendum §4).
     -- Company deck upload is explicitly Phase 2 (per the source notes) and
@@ -331,6 +336,19 @@ async function initSchema() {
     ALTER TABLE introductions DROP CONSTRAINT IF EXISTS introductions_engagement_stage_check;
     ALTER TABLE introductions ADD CONSTRAINT introductions_engagement_stage_check
       CHECK (engagement_stage IN (${DEAL_STATUSES.map((s) => `'${s}'`).join(",")})) NOT VALID;
+  `);
+
+  // Retailer status: Prospect (submitted, unreviewed — neutral/grey in the
+  // UI) / Duplicate (name matched an existing retailer at submission time
+  // — yellow) / Active in network (RIV approved — green) / Rejected (RIV
+  // declined, with a reason — red). NOT VALID for the same reason as
+  // above: existing rows already hold 'Prospect'/'Active in network',
+  // which are still valid, but NOT VALID keeps this safe against any
+  // future superset changes the same way.
+  await pool.query(`
+    ALTER TABLE retailers DROP CONSTRAINT IF EXISTS retailers_status_check;
+    ALTER TABLE retailers ADD CONSTRAINT retailers_status_check
+      CHECK (status IN ('Active in network','Prospect','Duplicate','Rejected')) NOT VALID;
   `);
 }
 

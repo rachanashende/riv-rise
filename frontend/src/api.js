@@ -81,6 +81,7 @@ export const api = {
   updateRetailer: (id, payload) => request(`/admin/retailers/${id}`, { method: "PUT", body: payload }),
   deleteRetailer: (id) => request(`/admin/retailers/${id}`, { method: "DELETE" }),
   approveRetailer: (id) => request(`/admin/retailers/${id}/approve`, { method: "PUT" }),
+  rejectRetailer: (id, reason) => request(`/admin/retailers/${id}/reject`, { method: "PUT", body: { reason } }),
   listIntroductionsAdmin: (status) => request(`/admin/introductions${status ? `?status=${encodeURIComponent(status)}` : ""}`),
   createIntroductionAdmin: (payload) => request("/admin/introductions", { method: "POST", body: payload }),
   updateIntroductionAdmin: (id, payload) => request(`/admin/introductions/${id}`, { method: "PUT", body: payload }),
