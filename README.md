@@ -6,7 +6,7 @@ application: own repo, own backend, own database. Not part of the RIOS
 monorepo (rios.retailinnovation.ai) — a separate app under the same parent
 company.
 
-Eventual home: `rise.retailinnovation.ventures`.
+Eventual home: `rise.retailinnovation.ai`.
 
 ## Structure
 
